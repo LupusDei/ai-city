@@ -1,73 +1,74 @@
 # AI City
 
-A new **game** — working title **"AI City."**
+A **web-based city-building game** — a modern recreation of the original **SimCity**.
 
-> **Bootstrap note.** The General's directive named the game ("AI City") but not its
-> genre, platform, or scope. This README lays out the most likely concept and the
-> decisions that must be locked before serious building. **Resolving the game concept is
-> the first job** — surface options + a recommendation to the General via `file_question`
-> before committing to an architecture.
+You found and grow a city on a square grid: provide **housing** and **infrastructure**
+(**water**, **food**) to support your residents, and the **population grows or shrinks**
+along a curve driven by how well those needs are met.
 
-## The likely concept (to confirm)
+## MVP scope (locked)
 
-Given the name and the Adjutant multi-agent context, the strongest read is:
+The first playable target, deliberately small:
 
-> **A living city simulation where the citizens are AI agents.** The player founds and
-> shapes a city; autonomous AI-driven residents pursue goals, form relationships, take
-> jobs, and react to the player's decisions — the city feels alive because it is *run by
-> agents*, not scripted crowds.
+- **Square grid** city map.
+- **Population: 1–20 people** to start.
+- **Three needs:** **water**, **food**, **housing**.
+- **Player goal:** place **housing** and **infrastructure** to supply those needs.
+- **Population growth curve:** population rises when needs are met, stalls/declines when
+  they're unmet — the core feedback loop.
+- **Web-based**, JavaScript framework (React / React Native, or similar — see Tech below).
 
-Plausible adjacent directions, worth a quick decision rather than a long debate:
-- **City-builder / management sim** — zone, build, budget; AI citizens are the simulation
-  layer (SimCity / Cities-lines lineage, but the sim is agent-driven).
-- **Emergent social sim** — smaller footprint, deeper agents; the drama between residents
-  *is* the game (Dwarf-Fortress / RimWorld lineage).
-- **Sandbox / "AI zoo"** — the player observes and nudges a city of LLM-or-behavior-tree
-  agents; the fun is watching emergent behavior (a toy/experience more than a win-state).
+Everything past this (power, roads, zoning depth, traffic, economy, disasters, larger
+maps) is **post-MVP** and lives in the backlog, not the first build.
 
-**Pick one primary pillar first.** The genre decides almost every downstream technical
-choice, so this is Epic 0.
+## Core loop (MVP)
 
-## Decisions that gate the build (resolve before heavy work)
+1. Player places housing + infrastructure (water/food sources) on the grid.
+2. Each tick, the sim computes **supply vs. demand** for water, food, housing.
+3. The **needs-met ratio** feeds the **growth curve**: met → population grows toward the
+   housing cap; unmet → growth stalls, then residents leave.
+4. Player reads the city's state, expands supply, and grows the population. Repeat.
 
-1. **Genre / core loop.** What does the player *do* minute-to-minute, and what's the
-   win/progress condition (if any)? See Epic 0.
-2. **Platform & tech.** Web (Canvas/WebGL, e.g. Phaser/PixiJS/Three) vs. a game engine
-   (Godot/Unity). Web keeps it inspectable and shippable via the existing tooling; an
-   engine buys richer rendering. **Recommend evaluating web-first** unless the vision
-   needs 3D.
-3. **What "AI" means here.** Behavior trees / utility AI / GOAP (cheap, deterministic,
-   offline) vs. LLM-driven agents (rich, emergent, but latency + cost + non-determinism).
-   A hybrid — cheap sim for the many, LLM for a few "named" citizens — is often the sweet
-   spot. This is the single most identity-defining choice.
-4. **Scale.** Tens of deep agents vs. thousands of shallow ones. Drives the whole
-   architecture (ECS, tick model, spatial partitioning).
-5. **Determinism & save/load.** Simulation games live or die on reproducible ticks and
-   robust saves — decide early, don't bolt on.
+*The growth curve tied to met/unmet needs is the heart of the game — get that satisfying
+first.*
 
-## Architecture sketch (to be refined in docs/outline.md + /speckit.plan)
+## Tech (to finalize in `/speckit.plan`)
 
-Simulation-first, whatever the shell:
-- **Simulation core** — deterministic tick loop; the source of truth for city + agents.
-- **Agent system** — perception → decision → action; pluggable "brains" (BT/utility/GOAP,
-  optionally LLM for select agents). Isolate the brain behind an interface so the AI
-  strategy can be swapped.
-- **World / city model** — grid or graph of tiles/buildings/roads; economy, needs, jobs.
-- **Renderer & UI** — reads simulation state; never owns game logic.
-- **Persistence** — deterministic save/load, replay if feasible.
-- **Content/config** — buildings, jobs, agent archetypes, tunables as data, not code.
+- **Web-based, JavaScript.** The General named **React Native or a similar JS framework**.
+  For a grid-sim rendered every tick, the conventional fit is **React for UI/shell +
+  a Canvas/WebGL layer** (plain Canvas, PixiJS, or similar) for the grid — React alone
+  re-rendering a large grid per tick is a perf trap. **React-Native-for-Web** is viable if
+  a shared mobile target matters; otherwise plain React + Canvas is simpler. **Confirm the
+  exact stack in the plan phase** (this is a tech choice, not a blocker).
+- **Simulation core is plain, framework-agnostic TypeScript** — deterministic tick loop,
+  fully testable, no rendering dependency. The renderer only *reads* sim state.
+
+## Architecture sketch (refine in docs/outline.md + /speckit.plan)
+
+- **Simulation core** — deterministic tick loop; authoritative city + population state.
+  Supply/demand for water/food/housing → needs-met ratio → growth curve. Pure TS, tested.
+- **World / grid model** — square grid of tiles; buildings (housing, water, food sources)
+  as data-driven types with supply/coverage rules.
+- **Population model** — residents (or aggregate cohorts at this scale) with the three
+  needs; the growth-curve function is a first-class, tunable, tested unit.
+- **Renderer & UI (React + Canvas/WebGL)** — grid view, placement tools, city readouts
+  (population, need coverage). Reads sim state; owns no game logic.
+- **Persistence** — deterministic save/load of the grid + population state.
+- **Content/config** — building types, need rates, growth-curve tunables as **data**.
 
 ## Non-negotiables
 
-- **Lock the genre + the meaning of "AI" before building the engine.** Everything hangs
-  on those two.
-- **Simulation core is the product** — deterministic, testable, decoupled from rendering.
-- **Data-driven content** so designers/agents can tune without code changes.
-- Follow the project constitution + testing rules installed by `adjutant init` (TDD,
-  simulation logic must be tested).
+- **Ship the MVP loop first** — grid + housing + water/food + the growth curve. Resist
+  scope creep (power/roads/economy/etc. are backlog until the loop is fun).
+- **Simulation core is the product** — deterministic, testable, decoupled from React.
+  **Do not put game logic in components.**
+- **The growth curve is data-driven and unit-tested** — it's the balance knob.
+- Follow the constitution + testing rules installed by `adjutant init` (TDD; sim logic and
+  the growth curve have tests; determinism is regression-tested).
 
 ## Status
 
 Bootstrapped and adjutant-initialized; ready for an agent to begin planning + building.
-See `docs/outline.md` for the initial epic/task outline. First move: **confirm the game
-concept (Epic 0)**, then `/speckit.specify` → `/speckit.plan` → beads (`aic-*`).
+See `docs/outline.md` for the epic/task outline. First move: `/speckit.specify` the MVP
+above → `/speckit.plan` (lock the exact React/Canvas stack) → `/speckit.tasks` →
+`/speckit.beads` (`aic-*`).
