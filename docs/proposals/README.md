@@ -13,6 +13,7 @@ should carry the design record on its own.
 | 01 | [Chain 1 of 3 — Break Ground (Regolith → Sinter → Shielded Habitat)](01-chain-regolith-shielded-habitat.html) | raynor | pending |
 | 02 | [Chain 2 of 3 — Sunlight and Silica (Silica → Silicon → Solar Array)](02-chain-silica-solar.html) | raynor | pending |
 | 03 | [Chain 3 of 3 — Ice, Air and the Provisioned Habitat](03-chain-ice-air-life-support.html) | raynor | pending |
+| 04 | [First Light — engine to playable game](04-first-light.html) | stetmann | pending |
 
 ## Reading order
 
