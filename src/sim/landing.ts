@@ -19,10 +19,18 @@
  *   need. The caller closes over whatever terrain/heightmap machinery it likes
  *   and hands this module a pure `(tiles) => number` function.
  *
- * - Mineral deposits are taken as plain `Coord[]` data, not sourced from a
- *   deposit-generation module of its own (none exists yet, and this bead does
- *   not require one). Treating deposits as caller-supplied data keeps this
- *   module honest about its actual dependency: coordinates, nothing more.
+ * - Mineral deposits are taken as plain `Coord[]` data rather than imported from
+ *   the module that generates them. Keeping the dependency inverted this way is
+ *   still right — this module's honest dependency is coordinates, nothing more —
+ *   but note the correction: a deposit-generation module DOES exist
+ *   (`buildability.ts`'s `generateDeposits`). An earlier version of this comment
+ *   said it did not, which was true when written in an isolated worktree and
+ *   false by the time both landed. That stale note helped hide aic-c1p: deposits
+ *   were generated and scored, and nothing joined the two, so 35% of the site
+ *   score ran on data no production code produced. The join now lives in
+ *   `world.ts` (`generateWorld`, `depositCoords`, `buildabilityScorerFor`) and is
+ *   covered by `tests/integration/world-seam.test.ts`. Callers should compose a
+ *   `World` rather than assembling these arguments by hand.
  *
  * - Validation mirrors the discriminated-union rejection pattern established
  *   in `placement.ts`: a bad site is an ORDINARY outcome of player choice (a
