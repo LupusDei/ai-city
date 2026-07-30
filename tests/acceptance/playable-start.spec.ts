@@ -101,6 +101,21 @@ test.describe('US1 — launch and survey', () => {
   })
 
   test('AC-1.3 the same seed renders identical terrain across reloads', async ({ page }) => {
+    // WHAT THIS ACTUALLY GUARDS, measured rather than assumed. The survey screen paints
+    // candidate-site markers OVER the canvas, and a Playwright element screenshot captures
+    // the element's box AS RENDERED — so the markers are inside these bytes. Verified by
+    // probe: placing one hull CHANGES this screenshot.
+    //
+    // So this assertion is stronger than its name: it pins the determinism of the marker
+    // layer as well as the terrain. That is why `SurveyScreen` forbids text over the map,
+    // transitions on a marker, and measured sizes, and uses whole-pixel geometry — those
+    // constraints are load-bearing here, not stylistic. Anyone "improving" the markers
+    // with a CSS transition or a ResizeObserver-driven size will break this test, and the
+    // failure will look like a terrain-rendering bug.
+    //
+    // Stress-checked at --repeat-each=10 on AC-1.3 alone and --repeat-each=3 on the full
+    // suite (48 runs): no flake. The agent that built this screen was killed by a 529
+    // before it could run that check; this is its unfinished work, completed.
     await openSurvey(page)
     const first = await page.locator(at(ID.terrainCanvas)).screenshot()
     await page.reload()
