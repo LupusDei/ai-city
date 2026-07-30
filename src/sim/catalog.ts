@@ -6,6 +6,40 @@
  * entry, with no change to simulation logic. `createCatalog` is the boundary where
  * that untrusted data is validated once, so the rest of the sim can treat catalog
  * contents as known-good.
+ *
+ * ============================================================================
+ * RESOURCE BASE UNITS — READ THIS BEFORE AUTHORING ANY CATALOG ENTRY
+ * ----------------------------------------------------------------------------
+ *   ENERGY is watt-hours (Wh).   NOT kW, NOT kWh.
+ *   MASS   is grams (g).         NOT kg, NOT tonnes.
+ *   Every amount is a NON-NEGATIVE INTEGER. There is no half a watt-hour.
+ *
+ *   So: a 5 kW draw sustained over a 25 h drone shift is `125_000`, not `125`
+ *   and certainly not `5`. A 300 kg regolith hopper is `300_000`, not `300`.
+ *   If a figure you were handed is in kW/kWh/kg, MULTIPLY BY 1000 before it
+ *   enters a `produces`/`consumes` map — that conversion belongs at the point
+ *   of authorship, never inside the sim.
+ * ----------------------------------------------------------------------------
+ * WHY (this is one project-wide rule, not a local opinion):
+ *   `time.ts` already makes the same argument for the clock and implements it in
+ *   integer seconds — "a colony sim that cannot replay identically from the same
+ *   seed is not a colony sim, it is a slot machine" (constitution §1). Integers
+ *   add and multiply exactly; floats do not, and float sums are ORDER-DEPENDENT.
+ *   That is not academic here: the moment brownouts impose a documented priority
+ *   order over consumers, a power-margin check starts hinging on whether a sum
+ *   landed on 119.99999 or 120, and the answer depends on which structure was
+ *   summed first. Integer base units make the question unaskable.
+ *
+ *   Choosing a small enough base unit is what lets the rule cost nothing: any
+ *   quantity a designer would naturally write as a fraction of a kilowatt-hour
+ *   or a kilogram is a whole number of watt-hours or grams. `validateResourceAmounts`
+ *   enforces it at this one boundary, so `ledger.ts` can do exact arithmetic
+ *   without re-validating anything.
+ *
+ *   Exactness ceiling: `Number.MAX_SAFE_INTEGER` (~9e15 Wh = 9 PWh). Colony-scale
+ *   figures sit ~8 orders of magnitude below it, so this is a documented boundary
+ *   rather than a practical constraint.
+ * ============================================================================
  */
 
 /** A tile offset relative to a structure's anchor tile. */
@@ -20,7 +54,13 @@ export interface FootprintOffset {
  * Deliberately an open string-keyed record rather than a closed union: the MVP only
  * constrains `electricity`, but silica/oxygen/hydrogen/carbon/metals must drop in as
  * data later. Keys are validated at load, so downstream code can rely on them being
- * non-empty strings mapped to finite non-negative numbers.
+ * non-empty strings mapped to non-negative integers.
+ *
+ * UNITS: watt-hours for energy, grams for mass — always whole numbers. See the
+ * base-units block at the top of this file. The type cannot express that (a
+ * branded integer type would infect every arithmetic site in the sim for no
+ * determinism benefit, since `createCatalog` already rejects non-integers), so
+ * the guarantee is a validated runtime invariant, not a compile-time one.
  */
 export type ResourceAmounts = Readonly<Record<string, number>>
 
@@ -51,6 +91,15 @@ export interface StructureCatalog {
   readonly types: ReadonlyMap<string, StructureType>
 }
 
+/**
+ * The project's one non-negative-integer guard. Shared by `buildTurns`,
+ * `habitatCapacity` AND every resource amount, deliberately: those are all
+ * whole-unit quantities for the same determinism reason, and a second
+ * near-identical guard would be the thing that eventually drifts.
+ *
+ * Rejects fractions, negatives, `NaN` and both infinities (`Number.isInteger` is
+ * false for all three of the latter).
+ */
 function assertNonNegativeInteger(value: number, label: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new RangeError(`${label} must be a non-negative integer, received: ${value}`)
@@ -89,16 +138,25 @@ function validateFootprint(id: string, footprint: readonly FootprintOffset[]): v
   }
 }
 
+/**
+ * Validate one `produces`/`consumes` map.
+ *
+ * Amounts must be non-negative INTEGERS in base units (Wh / grams) — the same
+ * discipline `time.ts` applies to the clock, for the same reason; see the
+ * base-units block at the top of this file. Enforced with the shared
+ * `assertNonNegativeInteger` rather than a bespoke check so there is exactly one
+ * definition of "whole unit" in the module.
+ *
+ * Note what is NOT constrained: the resource KEY space stays open. A brand-new
+ * resource kind is still pure data — the integer rule is a property of amounts,
+ * never a whitelist of known resources.
+ */
 function validateResourceAmounts(id: string, amounts: ResourceAmounts, label: string): void {
   for (const [resource, amount] of Object.entries(amounts)) {
     if (resource.length === 0) {
       throw new RangeError(`Structure "${id}": ${label} has an empty resource key`)
     }
-    if (!Number.isFinite(amount) || amount < 0) {
-      throw new RangeError(
-        `Structure "${id}": ${label}.${resource} must be a finite non-negative number, received: ${amount}`,
-      )
-    }
+    assertNonNegativeInteger(amount, `Structure "${id}": ${label}.${resource}`)
   }
 }
 

@@ -12,12 +12,40 @@
  * imports or depends on `catalog.ts` at runtime — this module accounts for
  * flows, it does not know what produced them.
  *
- * Values flowing through this module are assumed already validated (finite,
- * non-negative) by whatever authored them — `catalog.ts`'s `createCatalog` is
- * the project's one validation boundary for that. Mirroring `placement.ts`,
- * this module stays pure and never throws: an emergent resource deficit is an
- * ordinary, expected simulation outcome (see `Shortfall`), not a programmer
- * error.
+ * ============================================================================
+ * UNITS: every number in this module is a whole base unit —
+ *   ENERGY in watt-hours (Wh), MASS in grams (g). Never kW, kWh, kg or tonnes.
+ * ----------------------------------------------------------------------------
+ * A 5 kW draw over a 25 h shift enters the ledger as `125_000`, not `125`. The
+ * conversion belongs to whoever authors the number; nothing in here scales
+ * anything. `catalog.ts` (see its base-units block) is where the rule is
+ * ENFORCED — amounts must be non-negative integers — and this module is where
+ * the payoff is collected: integer sums are exact and, crucially,
+ * ORDER-INDEPENDENT, so `computeBalances` netting several structures gives a
+ * bit-identical result no matter what order the flows array happens to be in.
+ * With float amounts that would be a coin flip on the last bit, and it becomes
+ * observable the moment brownouts impose a documented priority order over
+ * consumers and a power margin turns on 119.99999 vs 120.
+ *
+ * This is not a local opinion: `time.ts` makes exactly this argument for the
+ * clock and implements it in integer seconds — "a colony sim that cannot replay
+ * identically from the same seed is not a colony sim, it is a slot machine"
+ * (constitution §1). Same discipline, same reason, one project-wide rule.
+ *
+ * Consequently this module contains NO division, averaging or percentage
+ * arithmetic, and must not grow any: addition and subtraction of integers are
+ * closed and exact, division is neither. A future rate/efficiency feature must
+ * be expressed as integer numerator and denominator applied at authoring time,
+ * not as a float multiplier here. Exactness ceiling: `Number.MAX_SAFE_INTEGER`.
+ * ============================================================================
+ *
+ * Values flowing through this module are assumed already validated
+ * (non-negative integers) by whatever authored them — `catalog.ts`'s
+ * `createCatalog` is the project's one validation boundary for that, and this
+ * module deliberately does not re-check, so there is exactly one place the rule
+ * lives. Mirroring `placement.ts`, this module stays pure and never throws: an
+ * emergent resource deficit is an ordinary, expected simulation outcome (see
+ * `Shortfall`), not a programmer error.
  */
 
 import type { ResourceAmounts } from './catalog'
@@ -35,10 +63,10 @@ export interface ResourceFlow {
 }
 
 /**
- * Running per-resource totals, keyed the same open-ended way as
- * `ResourceAmounts`. By construction (see `applyLedger`) every value here is
- * always `>= 0` — a deficit is never represented as a negative stockpile, it
- * is reported alongside as a `Shortfall` instead.
+ * Running per-resource totals in base units (Wh / grams), keyed the same
+ * open-ended way as `ResourceAmounts`. By construction (see `applyLedger`) every
+ * value here is always a `>= 0` integer — a deficit is never represented as a
+ * negative stockpile, it is reported alongside as a `Shortfall` instead.
  */
 export type Stockpile = Readonly<Record<string, number>>
 
