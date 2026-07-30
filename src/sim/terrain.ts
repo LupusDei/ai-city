@@ -22,19 +22,82 @@ import { MAX_GRID_DIMENSION } from './grid'
  * carried on the result (rather than discarded after generation) so two
  * `Terrain` values produced from the same inputs are trivially deep-equal, and
  * so downstream code/tests can confirm which seed produced a given map without
- * threading it through separately.
+ * threading it through separately. `latitude` is carried for the same reason —
+ * see its own doc comment for why it is a single map-level number.
  */
 export interface Terrain {
   readonly width: number
   readonly height: number
   readonly seed: number
+  /**
+   * The latitude of the map's CENTRE, in degrees, negative south, in [-90, 90].
+   *
+   * Deliberately ONE number for the whole map rather than a per-tile array. A
+   * colony map is on the order of 320 m across (64 tiles at 5 m each). Mars'
+   * mean radius is ~3,389.5 km, so a degree of latitude is ~59 km and the entire
+   * map spans roughly 0.005 degrees — about 20 arcseconds. Every consumer of
+   * latitude in this simulation (shallow-ice availability, solar insolation)
+   * varies over TENS of degrees, so a per-tile latitude array would be ~4,000
+   * numbers encoding a difference no rule can act on: false precision, plus a
+   * second width/height-shaped array to keep in sync with the first for nothing.
+   *
+   * Latitude is metadata that travels WITH the heightmap, not an input to it —
+   * `generateTerrain` never feeds it to the noise. That is load-bearing: it lets
+   * a caller slide the landing latitude and re-type the map's resources (see
+   * `generateDeposits`) without reshuffling its shape, so the player reads one
+   * axis changing rather than a whole new world.
+   */
+  readonly latitude: number
   readonly elevation: readonly number[]
 }
+
+/**
+ * Default map centre latitude: 40 degrees north.
+ *
+ * Chosen to match where real Mars mission planning keeps landing — Arcadia
+ * Planitia, ~40 degrees N — and for exactly the same reason: it is the
+ * compromise band. It is poleward of the ~35-40 degree limit for accessible
+ * shallow subsurface ice (NASA's SWIM ice-consistency mapping; see
+ * `ICE_MIN_ABS_LATITUDE_DEG` in buildability.ts), while staying far enough
+ * equatorward that solar insolation is still workable.
+ *
+ * A default is needed at all so the existing three-argument `generateTerrain`
+ * call sites keep working; picking the compromise band means the DEFAULT map
+ * does not silently disable a resource chain, which either extreme would.
+ */
+export const DEFAULT_MAP_LATITUDE_DEG = 40
 
 function assertValidDimension(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1 || value > MAX_GRID_DIMENSION) {
     throw new RangeError(
       `Terrain ${name} must be an integer in [1, ${MAX_GRID_DIMENSION}], received: ${value}`,
+    )
+  }
+}
+
+/**
+ * Validate a map-level latitude in degrees.
+ *
+ * Exported (unlike `assertValidDimension`) because latitude is validated at more
+ * than one boundary: here when a `Terrain` is generated, and again in
+ * `buildability.ts` when one is consumed, since a hand-built `Terrain` can carry
+ * any number at all. One shared assertion keeps the [-90, 90] rule and its error
+ * message from drifting apart between those two sites.
+ *
+ * `Number.isFinite` is not redundant with the range comparison: `NaN < -90` and
+ * `NaN > 90` are both false, so a range check written as two comparisons would
+ * admit `NaN` silently and poison every downstream `Math.abs(latitude)`
+ * comparison into a quiet "no" rather than a loud failure.
+ *
+ * Fractional degrees are accepted on purpose — a landing site is not obliged to
+ * sit on a whole degree — so there is no integer check here, unlike dimensions.
+ *
+ * @throws {RangeError} if `value` is not a finite number of degrees in [-90, 90].
+ */
+export function assertValidMapLatitude(value: number, label: string): void {
+  if (!Number.isFinite(value) || value < -90 || value > 90) {
+    throw new RangeError(
+      `${label} must be a finite number of degrees in [-90, 90] (negative south), received: ${value}`,
     )
   }
 }
@@ -52,8 +115,14 @@ function assertValidDimension(value: number, name: string): void {
  * Returns a closure over its internal state rather than a global generator so
  * that two calls to `generateTerrain` never share (and can never accidentally
  * mutate) each other's sequence.
+ *
+ * Exported so `buildability.ts` can key its own deterministic draws off the same
+ * construction. It previously held a verbatim copy of this function purely
+ * because this module did not export it; a second copy of a determinism
+ * primitive is a copy that can drift, and a future reviewer auditing
+ * reproducibility should have exactly one small algorithm to trust.
  */
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   // `>>> 0` folds any finite number (including negatives) into an unsigned
   // 32-bit integer, which is the state mulberry32 operates on.
   let state = seed >>> 0
@@ -163,9 +232,10 @@ function buildOctaves(width: number, height: number): readonly Octave[] {
 /**
  * Generate a deterministic Martian elevation heightmap.
  *
- * The same `(width, height, seed)` triple always produces a deeply-equal
- * `Terrain`, on any run or process, because every random draw flows from a
- * single `mulberry32` instance seeded exactly once at the top of this function.
+ * The same `(width, height, seed, latitude)` tuple always produces a
+ * deeply-equal `Terrain`, on any run or process, because every random draw flows
+ * from a single `mulberry32` instance seeded exactly once at the top of this
+ * function.
  *
  * Algorithm: layered (fractal) value noise. A coarse lattice of random control
  * points is generated per octave, smoothstep-interpolated to a continuous
@@ -173,13 +243,28 @@ function buildOctaves(width: number, height: number): readonly Octave[] {
  * The raw sum is then min-max normalised to [0, 1] so the output range is exact
  * regardless of octave count or amplitude choices.
  *
+ * `latitude` is an OPTIONAL trailing parameter (defaulting to
+ * {@link DEFAULT_MAP_LATITUDE_DEG}) rather than a required one, so every existing
+ * three-argument call site keeps compiling and keeps producing the same
+ * elevations. It is deliberately NOT fed to the noise: two terrains differing
+ * only in latitude have byte-identical `elevation` arrays. See the `latitude`
+ * field on {@link Terrain} for why that matters.
+ *
  * @throws {RangeError} if either dimension is not an integer in
  *   [1, MAX_GRID_DIMENSION] — mirrors `createGrid`'s validation in grid.ts, since
  *   a terrain is generated for exactly one grid and must obey the same bound.
+ * @throws {RangeError} if `latitude` is not a finite number of degrees in
+ *   [-90, 90].
  */
-export function generateTerrain(width: number, height: number, seed: number): Terrain {
+export function generateTerrain(
+  width: number,
+  height: number,
+  seed: number,
+  latitude: number = DEFAULT_MAP_LATITUDE_DEG,
+): Terrain {
   assertValidDimension(width, 'width')
   assertValidDimension(height, 'height')
+  assertValidMapLatitude(latitude, 'Terrain latitude')
 
   const rand = mulberry32(seed)
   const octaves = buildOctaves(width, height)
@@ -221,7 +306,7 @@ export function generateTerrain(width: number, height: number, seed: number): Te
     elevation[i] = range > 0 ? (value - min) / range : 0.5
   }
 
-  return { width, height, seed, elevation }
+  return { width, height, seed, latitude, elevation }
 }
 
 /**

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { generateTerrain, elevationAt } from '../../src/sim/terrain'
+import {
+  DEFAULT_MAP_LATITUDE_DEG,
+  assertValidMapLatitude,
+  generateTerrain,
+  elevationAt,
+} from '../../src/sim/terrain'
 import { MAX_GRID_DIMENSION } from '../../src/sim/grid'
 
 describe('generateTerrain', () => {
@@ -143,5 +148,85 @@ describe('elevationAt', () => {
 
   it('should return undefined for NaN coordinates', () => {
     expect(elevationAt(terrain, { x: Number.NaN, y: 1 })).toBeUndefined()
+  })
+})
+
+describe('map latitude', () => {
+  it('should default to DEFAULT_MAP_LATITUDE_DEG when the caller omits latitude, keeping the three-argument call site valid', () => {
+    const terrain = generateTerrain(8, 8, 1)
+    expect(terrain.latitude).toBe(DEFAULT_MAP_LATITUDE_DEG)
+  })
+
+  it('should default to a latitude poleward enough for shallow ice to be reachable', () => {
+    // The default has to be a site a player could actually run an ice chain at,
+    // or the default map silently disables a whole resource chain. 40 deg is
+    // Arcadia Planitia's latitude, which is exactly why real mission planning
+    // keeps landing on it: far enough poleward for SWIM-mapped shallow ice, far
+    // enough equatorward that insolation is still workable.
+    expect(Math.abs(DEFAULT_MAP_LATITUDE_DEG)).toBeGreaterThanOrEqual(35)
+    expect(Math.abs(DEFAULT_MAP_LATITUDE_DEG)).toBeLessThanOrEqual(90)
+  })
+
+  it('should carry the caller-supplied latitude verbatim, including fractional and southern (negative) values', () => {
+    expect(generateTerrain(4, 4, 1, 22.5).latitude).toBe(22.5)
+    expect(generateTerrain(4, 4, 1, -68.2).latitude).toBe(-68.2)
+  })
+
+  it('should accept the exact endpoints of the valid range: 0 and both poles', () => {
+    expect(generateTerrain(2, 2, 1, 0).latitude).toBe(0)
+    expect(generateTerrain(2, 2, 1, 90).latitude).toBe(90)
+    expect(generateTerrain(2, 2, 1, -90).latitude).toBe(-90)
+  })
+
+  it.each([
+    ['just past the north pole', 90.000001],
+    ['just past the south pole', -90.000001],
+    ['far past the north pole', 1000],
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+  ])('should reject latitude %s with a RangeError', (_label, latitude) => {
+    expect(() => generateTerrain(4, 4, 1, latitude)).toThrow(RangeError)
+  })
+
+  it('should leave elevation byte-identical when only latitude changes, proving latitude is carried metadata and not a noise input', () => {
+    // Load-bearing design property. Latitude must retype the map's RESOURCES
+    // without reshuffling its SHAPE: if latitude perturbed the heightmap, a
+    // player sliding the landing latitude would get an entirely different world,
+    // and the ice-versus-insolation tradeoff would become unreadable noise
+    // instead of a legible choice about one axis.
+    const equatorial = generateTerrain(24, 24, 4242, 0)
+    const polar = generateTerrain(24, 24, 4242, 75)
+    expect(equatorial.elevation).toEqual(polar.elevation)
+  })
+
+  it('should still make two terrains differing only in latitude non-deep-equal, so latitude is part of the terrain value', () => {
+    const a = generateTerrain(6, 6, 9, 10)
+    const b = generateTerrain(6, 6, 9, 50)
+    expect(a).not.toEqual(b)
+  })
+
+  it('should keep same-seed same-latitude terrains deeply equal', () => {
+    expect(generateTerrain(12, 9, 777, -41.5)).toEqual(generateTerrain(12, 9, 777, -41.5))
+  })
+})
+
+describe('assertValidMapLatitude', () => {
+  it('should accept every latitude inside the closed range, including the endpoints', () => {
+    for (const latitude of [-90, -35, -0.5, 0, 0.5, 35, 90]) {
+      expect(() => assertValidMapLatitude(latitude, 'latitude')).not.toThrow()
+    }
+  })
+
+  it('should throw a RangeError naming the label it was given, so callers can tell which latitude was bad', () => {
+    expect(() => assertValidMapLatitude(120, 'Terrain latitude')).toThrow(RangeError)
+    expect(() => assertValidMapLatitude(120, 'Terrain latitude')).toThrow(/Terrain latitude/)
+  })
+
+  it('should reject non-finite values rather than letting NaN pass a naive range comparison', () => {
+    // `NaN < -90` and `NaN > 90` are both false, so a range check written as two
+    // comparisons without a finiteness guard admits NaN silently.
+    expect(() => assertValidMapLatitude(Number.NaN, 'latitude')).toThrow(RangeError)
+    expect(() => assertValidMapLatitude(Number.POSITIVE_INFINITY, 'latitude')).toThrow(RangeError)
   })
 })

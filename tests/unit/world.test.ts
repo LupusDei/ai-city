@@ -22,8 +22,8 @@ function mapOf(width: number, height: number, score: readonly number[]): Buildab
 describe('depositCoords', () => {
   it('should strip richness and preserve order', () => {
     const deposits: readonly MineralDeposit[] = [
-      { x: 3, y: 4, richness: 0.9 },
-      { x: 1, y: 2, richness: 0.1 },
+      { x: 3, y: 4, kind: 'silica', richness: 0.9 },
+      { x: 1, y: 2, kind: 'ice', richness: 0.1 },
     ]
     expect(depositCoords(deposits)).toEqual([
       { x: 3, y: 4 },
@@ -36,11 +36,16 @@ describe('depositCoords', () => {
   })
 
   it('should not alias the input objects', () => {
-    const deposits: readonly MineralDeposit[] = [{ x: 1, y: 1, richness: 0.5 }]
+    const deposits: readonly MineralDeposit[] = [{ x: 1, y: 1, kind: 'silica', richness: 0.5 }]
     const coords = depositCoords(deposits)
     // A returned object that aliased the deposit would carry `richness` along,
     // silently widening the Coord contract for every downstream consumer.
+    // Now also proves `kind` does not leak: MineralDeposit gained a required
+    // `kind` field (aic-m3t), and a returned object that aliased the deposit
+    // would carry BOTH richness and kind into every downstream Coord consumer.
     expect(Object.keys(coords[0]!).sort()).toEqual(['x', 'y'])
+    expect('kind' in coords[0]!).toBe(false)
+    expect('richness' in coords[0]!).toBe(false)
     expect(coords[0]).not.toBe(deposits[0])
   })
 })
