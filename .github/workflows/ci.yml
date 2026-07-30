@@ -55,23 +55,20 @@ jobs:
   # needs a browser download the unit job does not, and it must be able to fail
   # without taking the unit gate down with it.
   #
-  # WHY continue-on-error IS ON RIGHT NOW. The suite was written BEFORE the app, so
-  # it fails for the right reason first (aic-8tl.7). Today most of it fails: there
-  # is no survey screen, no canvas renderer, no sim/UI adapter and no landing
-  # bridge (aic-8tl.1-.5, aic-hfb). Without this flag every unrelated PR would go
-  # red for the duration of Epic 3 and the signal would be ignored - which is worse
-  # than not having it. The results stay fully VISIBLE in the job log and the
-  # uploaded report; they simply do not block.
+  # continue-on-error WAS set here while the suite had no app to run against — it was
+  # written first and failed for the right reason, and without the flag every unrelated PR
+  # would have gone red for the duration of Epic 3.
   #
-  # >>> REMOVE `continue-on-error` THE MOMENT THE SUITE FIRST GOES GREEN. <<<
-  # It is a scaffold for a suite that has no app yet, not a policy about acceptance
-  # tests. Leaving it in place after spec 005 lands would turn the project's only
-  # end-to-end gate into decoration - exactly the failure mode the composition
-  # ratchet exists to prevent.
+  # REMOVED on 2026-07-30, the commit after the suite first went 16/16 (aic-57z). It was a
+  # scaffold, not a policy about acceptance tests, and leaving it would have turned the
+  # project's ONLY end-to-end gate into decoration — precisely the failure aic-j18 was
+  # filed for, where constitution s3 mandated a lint gate that had never once run.
+  #
+  # This job is now BLOCKING. A failing acceptance test means a person can no longer start
+  # the game and take a turn, and that should stop a merge.
   # ---------------------------------------------------------------------------
   acceptance:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout repository

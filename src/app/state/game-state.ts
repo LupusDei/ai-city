@@ -123,24 +123,37 @@ import type { World } from '../../sim/world'
 export const MAP_DIMENSION = 64
 
 /**
- * Colonists arriving when the deadline hits — the mission's win threshold.
+ * Colonists arriving on wave 2 — the mission's win threshold.
  *
- * NOT A RATIFIED FIGURE, and flagged as such rather than presented as one. The README
- * locks the deadline (577 days = 278 turns) and the win CONDITION ("habitat capacity
- * sufficient for the arriving colonist wave") but no document in this repo states the
- * wave SIZE. Six is taken from `docs/turn-composition-audit.md`, which describes one
- * habitat's 25 kW rated life support as "~4 kW x 6 colonists of rated capacity" — i.e.
- * one completed habitat houses one wave, which makes the MVP's win condition "finish a
- * habitat" rather than an arbitrary arithmetic target.
+ * RATIFIED BY THE GENERAL 2026-07-30: **100 colonists**, arriving with roughly two Earth
+ * years of food (enough to reach wave 3), plus oxygen, water, equipment, drones, reactors
+ * and batteries.
  *
- * It is authored HERE because `mission.ts` is explicit that both the deadline and the
- * wave size are data ("a design change to either must only ever require a new
- * `MissionConfig` value, not a code change"), and the composition root is what supplies
- * that data. It affects nothing in this slice except the verdict AT the deadline — turn 1
- * through 277 are identical for any value. Replace it when the General rules on a number;
- * `beginSurvey` takes a `mission` override so no test has to depend on this default.
+ * That last clause is the important half and it reframes the whole mission. The wave is
+ * not only a demand, it is a RESUPPLY: it brings its own consumables and its own power and
+ * labour. So the colony is not being asked to feed 100 people or to generate the 400 kW
+ * their rated life support will eventually draw (10 reactors' worth — far beyond the three
+ * that survived). It is being asked to have somewhere survivable for them to arrive INTO.
+ * You are building a beachhead, not a self-sufficient city.
+ *
+ * WHAT 100 COSTS, at figures already ratified elsewhere in this codebase:
+ *   - 13 habitat modules at 8 colonists each = 52 tiles of habitat.
+ *   - 80 kW just to hold those 13 empty on STANDBY (20% of the 4 kW/colonist rated draw).
+ *     That is two of your three reactors, spent on buildings nobody lives in yet, before
+ *     a single drone recharges. THIS is the death spiral the design was built around,
+ *     now with a number attached: over-build habitats early and the standby draw eats the
+ *     power budget that was buying you labour.
+ *   - 5,850 t of regolith to shield them (98 Hopper-turns) and 143 t of sintered crust
+ *     (119 Press-turns) — against a 278-turn budget, with one Press costing 75% of a
+ *     reactor to run. Chain 1 stops being optional.
+ *
+ * Superseded 6, which was an unratified placeholder authored by the adapter when no figure
+ * existed anywhere in the repo. 6 made the win condition trivial: a single habitat cleared
+ * it. 100 makes it the mission.
+ *
+ * `beginSurvey` takes a `mission` override, so no test depends on this default.
  */
-export const INCOMING_WAVE_SIZE = 6
+export const INCOMING_WAVE_SIZE = 100
 
 /** The mission every session runs unless a caller states otherwise. */
 export const DEFAULT_MISSION: MissionConfig = {
