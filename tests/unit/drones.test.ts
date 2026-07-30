@@ -6,6 +6,8 @@ import {
   CHARGE_EFFICIENCY,
   PACK_THERMAL_WATTS,
   computeDroneShift,
+  DRONE_GRID_ENERGY_WH,
+  DRONE_RECHARGE_ENERGY_WH,
 } from '../../src/sim/drones'
 import { DEFAULT_TURN_CYCLE, MARS_SOL_SECONDS } from '../../src/sim/time'
 import type { TurnCycleConfig } from '../../src/sim/time'
@@ -214,5 +216,43 @@ describe('computeDroneShift — against the real, locked turn cycle', () => {
     expect(result.dronesOnShift).toBe(3)
     expect(result.dronesHeldOffline).toBe(2)
     expect(result.labourCapacityHours).toBe(75) // 25h * 3
+  })
+})
+
+describe('integer watt-hour base units (aic-049)', () => {
+  // RATIFIED BY THE GENERAL: "Watt hours for the win." The ledger enforces integer
+  // base units (aic-5ub), so drone energy must be expressible as whole watt-hours
+  // or the guard will correctly reject drone recharge the moment it becomes a real
+  // consumes.electricity amount.
+  it('should express pack energy as a whole number of watt-hours', () => {
+    expect(DRONE_RECHARGE_ENERGY_WH).toBe(125_000)
+    expect(Number.isInteger(DRONE_RECHARGE_ENERGY_WH)).toBe(true)
+  })
+
+  it('should express grid energy as a whole number of watt-hours', () => {
+    // 125,000 / 0.92 + 32 W x 24.659722 h = 136,658.6763 Wh, rounded to nearest Wh.
+    expect(DRONE_GRID_ENERGY_WH).toBe(136_659)
+    expect(Number.isInteger(DRONE_GRID_ENERGY_WH)).toBe(true)
+  })
+
+  it('should keep the rounding error negligible against the derived value', () => {
+    const derived =
+      (DRONE_RECHARGE_ENERGY_WH / CHARGE_EFFICIENCY) +
+      PACK_THERMAL_WATTS * (MARS_SOL_SECONDS / 3600)
+    const errorPpm = (Math.abs(DRONE_GRID_ENERGY_WH - derived) / derived) * 1e6
+    // 2.4 ppm. Asserted rather than commented so a future edit that quietly
+    // changes a constant cannot silently widen the approximation.
+    expect(errorPpm).toBeLessThan(10)
+  })
+
+  it('should preserve the ratified 5.54 kW draw', () => {
+    const drawKw = DRONE_GRID_ENERGY_WH / 1000 / (MARS_SOL_SECONDS / 3600)
+    expect(drawKw).toBeCloseTo(5.54, 2)
+  })
+
+  it('should agree with the legacy kWh figure to within the rounding error', () => {
+    // The kWh constants remain as derived views for reporting; the Wh figures are
+    // now canonical. They must not drift apart.
+    expect(DRONE_GRID_ENERGY_WH / 1000).toBeCloseTo(DRONE_GRID_ENERGY_KWH, 3)
   })
 })

@@ -32,6 +32,19 @@ export type DroneId = string
  */
 export const DRONE_RECHARGE_ENERGY_KWH = 125
 
+/**
+ * Energy restored to one drone's pack per recharge sol, in INTEGER WATT-HOURS.
+ *
+ * RATIFIED BY THE GENERAL (aic-049): "Watt hours for the win." Watt-hours are the
+ * ledger's base unit for energy (aic-5ub), and `catalog.ts` now REJECTS any
+ * non-integer resource amount — so the moment drone recharge becomes a real
+ * `consumes.electricity` entry, a fractional kWh figure would be refused. These
+ * Wh constants are therefore the canonical ones; the kWh values above and below
+ * remain as derived views for prose and reporting, and tests assert the two never
+ * drift apart.
+ */
+export const DRONE_RECHARGE_ENERGY_WH = 125_000
+
 /** Seconds per hour, used only for the kWh -> kW unit conversion below. */
 const SECONDS_PER_HOUR = 3600
 
@@ -67,6 +80,39 @@ export const PACK_THERMAL_WATTS = 32
 export const DRONE_GRID_ENERGY_KWH =
   DRONE_RECHARGE_ENERGY_KWH / CHARGE_EFFICIENCY +
   (PACK_THERMAL_WATTS * (MARS_SOL_SECONDS / 3600)) / 1000
+
+/**
+ * Total energy the colony grid must supply per drone per recharge sol, in INTEGER
+ * WATT-HOURS. The canonical figure for the power budget.
+ *
+ * DERIVATION AND THE ROUNDING, both ratified (aic-049):
+ *   125,000 Wh / 0.92 charge efficiency        = 135,869.5652 Wh
+ *   + 32 W x 24.659722 h pack thermal upkeep   =      789.1111 Wh
+ *                                              = 136,658.6763 Wh
+ * Rounded to the nearest whole watt-hour: 136,659 Wh.
+ *
+ * The rounding error is 0.3237 Wh, or 2.4 PARTS PER MILLION. It preserves the
+ * General's ratified 5.54 kW draw exactly at the precision he stated it, and the
+ * reactor budget is unchanged to four decimal places: 120 kW (three 40 kWe units)
+ * supports 21.6537 drones both before and after. Rounding HERE, once, at the point
+ * of definition, was chosen over rounding at each ledger call site — an implicit
+ * rounding scattered across callers is precisely the silent inexactness the integer
+ * discipline exists to prevent.
+ *
+ * WHY `FLOOR_EPSILON` BELOW STILL EXISTS. It would be satisfying to delete it now
+ * that this constant is an integer, and that was the hoped-for prize. It cannot go
+ * yet, and the reason is worth recording: the epsilon is not a workaround for THIS
+ * value being inexact, it is a consequence of `maxDronesSupportedByPower` taking a
+ * FLOAT kW budget as its input. Integer-dividing an integer Wh budget by this
+ * constant is exact and needs no epsilon — so the epsilon dies when the caller
+ * passes watt-hours, not when this constant becomes whole. That migration belongs
+ * with the ledger wiring in aic-a00.6, where the caller is written, and it is
+ * recorded there as an explicit acceptance criterion.
+ */
+export const DRONE_GRID_ENERGY_WH = Math.round(
+  DRONE_RECHARGE_ENERGY_WH / CHARGE_EFFICIENCY +
+    PACK_THERMAL_WATTS * (MARS_SOL_SECONDS / 3600),
+)
 
 /**
  * Average power one drone draws from the colony grid while recharging, in kW.
