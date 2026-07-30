@@ -92,3 +92,38 @@ npm test          # Must pass
 - **Framework**: Vitest
 - **React Testing**: @testing-library/react
 - **Mocking**: Vitest built-in mocks (`vi.mock`, `vi.fn`, `vi.spyOn`)
+
+## Seam Testing (MANDATORY — added after aic-c1p)
+
+**For any pair of beads built in separate worktrees, one integration test MUST
+exercise the seam between them before either bead can close.**
+
+### Why this exists
+
+`aic-74p.2` (deposit generation) and `aic-74p.3` (landing scoring) both closed
+green at 100% coverage. Neither was ever wired to the other: `generateDeposits`
+had zero production consumers, and `landing.ts` never imported it. 35% of the
+landing-site score was driven by data with no production source.
+
+Both beads fully met their acceptance criteria. **Neither one's criteria
+mentioned the other** — which is exactly how the seam went missing.
+
+### The structural point
+
+Worktree isolation (Constitution §7) protects files from each other. **Nothing
+protects the interfaces between them**, and unit tests structurally cannot: a
+unit test on either side of a missing seam passes happily. Parallelism does not
+remove risk, it *relocates* risk to the boundaries.
+
+### Rules
+
+1. A squad wave does not end when every agent reports success. It ends when the
+   **seams that wave created** are tested.
+2. When an agent is told to decouple from a concurrent module (injected
+   callback, duck-typed parameter, local re-implementation), **file the wiring
+   follow-up bead in the same breath**. The decoupling is deliberate; failing to
+   re-couple is the defect.
+3. Integration tests assert the modules are actually *connected* — that
+   production code, not just a test, consumes the other module's output.
+4. Grep for zero-consumer exports before closing a wave. An exported symbol
+   imported only by its own test is an unfinished seam.
