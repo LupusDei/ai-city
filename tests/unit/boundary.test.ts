@@ -101,7 +101,12 @@ function mask(source: string, maskStrings: boolean): string {
       continue
     }
 
-    const c = source[i]
+    // `!` is safe and load-bearing: the enclosing `while (i < n)` guarantees this
+    // index is in range. Leaving it as `string | undefined` mattered — `out += c`
+    // below would append the 9-character literal "undefined" on a miss, breaking
+    // mask()'s character-for-character length invariant and silently corrupting
+    // every index -> line-number lookup downstream.
+    const c = source[i]!
 
     if (maskStrings && (c === '"' || c === "'")) {
       const quote = c

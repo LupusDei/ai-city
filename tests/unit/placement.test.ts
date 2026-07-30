@@ -299,7 +299,10 @@ describe('applyPlacement', () => {
   function place(grid: Grid, id: string, type: StructureType, anchor: { x: number; y: number }) {
     const result = validatePlacement(grid, type, anchor)
     if (!result.ok) throw new Error('fixture setup failed: expected a valid placement')
-    return { grid: applyValid(grid, id, result), placement: result as ValidPlacement }
+    // No `as ValidPlacement` needed: the `!result.ok` throw above already narrows
+    // `result`. Constitution §2 requires a comment on every assertion, and the
+    // honest comment for that one was "it does nothing".
+    return { grid: applyValid(grid, id, result), placement: result }
   }
 
   it('should occupy every footprint tile, not just the anchor', () => {
