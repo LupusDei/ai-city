@@ -17,5 +17,11 @@ dist/
 # Test coverage output
 coverage/
 
+# Playwright acceptance-run output: traces, screenshots and the HTML report.
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # Agent scratch space: working drafts, generated HTML, one-off scripts.
 .scratch/

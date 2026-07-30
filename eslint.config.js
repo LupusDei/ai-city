@@ -29,6 +29,10 @@ export default tseslint.config(
       // See tsconfig: typechecked and linted by the acceptance project (aic-8tl.6),
       // not here, because it imports @playwright/test.
       'tests/acceptance/**',
+      // Playwright's own output. Regenerated on every run and full of HTML, traces and
+      // screenshots; both are gitignored.
+      'test-results/**',
+      'playwright-report/**',
     ],
   },
 
@@ -42,7 +46,10 @@ export default tseslint.config(
   },
 
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts', '*.config.ts'],
+    // `.tsx` is listed alongside `.ts` so React components get the SAME type-aware
+    // ruleset as the sim. A UI file is not a second-class file: the seam between the sim
+    // and the screen is precisely where this project's defects have lived.
+    files: ['src/**/*.ts', 'src/**/*.tsx', 'tests/**/*.ts', 'tests/**/*.tsx', '*.config.ts'],
     extends: [
       js.configs.recommended,
       // Type-aware ruleset. This is the whole point of the gate: `tsc` already
@@ -116,7 +123,7 @@ export default tseslint.config(
     // ---------------------------------------------------------------------
     // RELAXED, TEST FILES ONLY — src/ keeps the strict rules
     // ---------------------------------------------------------------------
-    files: ['tests/**/*.ts'],
+    files: ['tests/**/*.ts', 'tests/**/*.tsx'],
     rules: {
       // no-non-null-assertion: off in tests, ERROR in src.
       // tsconfig sets `noUncheckedIndexedAccess: true`, so every array index is

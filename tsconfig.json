@@ -1,9 +1,30 @@
 {
+  /* The main program: sim, app, unit/integration tests and the *.config.ts files.
+   *
+   * This is also the program `typescript-eslint`'s `projectService` resolves against, so
+   * the lint and typecheck views of the codebase cannot drift apart. Keep every file that
+   * should be linted inside `include` below.
+   *
+   * There are two sibling programs, each doing a job this one cannot:
+   *   - `tsconfig.sim.json`        — re-checks src/sim/ with NO DOM lib (see `lib` below).
+   *   - `tsconfig.acceptance.json` — the Playwright suite, which needs its own globals.
+   * `npm run typecheck` runs all three. */
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+
+    /* DOM is required by `src/app/**` (React, canvas, URLSearchParams) and is therefore
+     * visible to `src/sim/**` in THIS program too. That is not the sim's guarantee:
+     * `tests/unit/boundary.test.ts` bans DOM globals in the sim outright, and
+     * `npm run typecheck` additionally compiles the sim against `tsconfig.sim.json`,
+     * where DOM is absent and any such reference simply fails to resolve. Two
+     * independent checks, neither relying on this line. */
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+
+    /* React 19's automatic runtime: no `import React` needed in a .tsx file, and the
+     * transform matches what @vitejs/plugin-react emits. */
+    "jsx": "react-jsx",
 
     /* Constitution §2: Type Safety — strict mode, no exceptions. */
     "strict": true,
@@ -18,11 +39,15 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "*.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "*.config.ts"],
   // The Playwright acceptance suite is excluded from the sim/unit typecheck because it
   // imports @playwright/test, which is installed by aic-8tl.6 alongside its own
   // tsconfig and runner. Including it here made `npm run verify` fail for EVERY agent
   // the moment the spec landed (my error - the spec was pushed a commit ahead of its
   // dependency). It gets typechecked by the acceptance project, not by this one.
+  //
+  // aic-8tl.6 addendum: that acceptance project is now `tsconfig.acceptance.json`, and
+  // `npm run typecheck` runs it too. This exclusion keeps the two suites' globals and
+  // `types` apart; it does NOT leave the spec unchecked.
   "exclude": ["node_modules", "dist", "coverage", "tests/acceptance"]
 }

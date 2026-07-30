@@ -1,0 +1,25 @@
+{
+  /* The Playwright acceptance project.
+   *
+   * `tsconfig.json` deliberately EXCLUDES `tests/acceptance/` (see the note there): a
+   * Playwright suite and a Vitest suite want different globals, and forcing both into one
+   * program is a fight with no upside. This is the other half of that split — the program
+   * that does typecheck the acceptance suite.
+   *
+   * It is wired into `npm run typecheck`, so the spec cannot silently rot: if a testid
+   * helper or a Playwright API changes shape, `npm run verify` says so. That is safe now
+   * in a way it was not before, because `@playwright/test` is a real dependency as of
+   * aic-8tl.6 — the earlier breakage was the spec landing one commit AHEAD of this
+   * dependency, not the typechecking itself. */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* The suite runs in Node and drives a browser, so it needs both sides: `Buffer` (used
+     * by the AC-1.3 screenshot comparison) from @types/node, and the DOM lib inherited
+     * from the base config for Playwright's own evaluate-side types. */
+    "types": ["node"]
+  },
+  "include": ["tests/acceptance/**/*.ts", "playwright.config.ts"],
+  /* Must be cleared explicitly: the base config excludes `tests/acceptance`, and an
+   * inherited `exclude` would cancel out the `include` above. */
+  "exclude": []
+}

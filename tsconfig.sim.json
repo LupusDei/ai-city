@@ -1,0 +1,30 @@
+{
+  /* The sim purity pass.
+   *
+   * WHY THIS FILE EXISTS. `tsconfig.json` must include the DOM lib, because `src/app/**`
+   * is React and canvas and cannot compile without it. But `lib` is program-wide: once
+   * DOM is on, `document.querySelector(...)` inside `src/sim/` would typecheck happily,
+   * and the project's #1 non-negotiable rule (README, constitution §4: the sim is a
+   * framework-agnostic, headless, deterministic core) would be enforced by nothing but a
+   * regex test.
+   *
+   * This program compiles `src/sim/` ALONE against ES2022 with NO DOM. Any DOM global
+   * that creeps in fails to resolve here, as a compiler error, independently of
+   * `tests/unit/boundary.test.ts`. The two checks are complementary: this one catches
+   * DOM *types*, the boundary test also catches `react` imports and nondeterministic
+   * calls (`Math.random`, `Date.now`) that a compiler cannot object to.
+   *
+   * Run by `npm run typecheck`. If it fails, do not add DOM to `lib` here — remove the
+   * DOM dependency from the sim, or move that code to `src/app/`. */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* Note this REPLACES the base `lib` rather than extending it — that is the point. */
+    "lib": ["ES2022"],
+    /* The sim must not depend on Node's globals either: it has to run in a browser and in
+     * a test harness unchanged. An empty `types` stops @types/node being auto-included,
+     * so `process`, `Buffer` and `require` are just as unavailable as `document`. */
+    "types": []
+  },
+  "include": ["src/sim/**/*.ts"],
+  "exclude": []
+}

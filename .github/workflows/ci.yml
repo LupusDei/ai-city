@@ -38,3 +38,59 @@ jobs:
 
       - name: Test Coverage
         run: npm run test:coverage
+
+  # ---------------------------------------------------------------------------
+  # Acceptance suite — tests/acceptance/playable-start.spec.ts driving a real browser
+  # against a real dev server. This is the definition of done for spec 005.
+  #
+  # WHY A SEPARATE JOB. It answers a different question from `build-and-test`
+  # ("can a person start this game and take a turn" vs "is the code correct"), it
+  # needs a browser download the unit job does not, and it must be able to fail
+  # without taking the unit gate down with it.
+  #
+  # WHY continue-on-error IS ON RIGHT NOW. The suite was written BEFORE the app, so
+  # it fails for the right reason first (aic-8tl.7). Today most of it fails: there
+  # is no survey screen, no canvas renderer, no sim/UI adapter and no landing
+  # bridge (aic-8tl.1-.5, aic-hfb). Without this flag every unrelated PR would go
+  # red for the duration of Epic 3 and the signal would be ignored - which is worse
+  # than not having it. The results stay fully VISIBLE in the job log and the
+  # uploaded report; they simply do not block.
+  #
+  # >>> REMOVE `continue-on-error` THE MOMENT THE SUITE FIRST GOES GREEN. <<<
+  # It is a scaffold for a suite that has no app yet, not a policy about acceptance
+  # tests. Leaving it in place after spec 005 lands would turn the project's only
+  # end-to-end gate into decoration - exactly the failure mode the composition
+  # ratchet exists to prevent.
+  # ---------------------------------------------------------------------------
+  acceptance:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Only chromium: the acceptance criteria are about game flow, not browser
+      # compatibility, and three engines would triple the download for no signal.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Acceptance tests
+        run: npm run test:acceptance
+
+      - name: Upload acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
