@@ -19,7 +19,8 @@
 
 import type { Coord } from './grid'
 import type { Terrain } from './terrain'
-import { assertValidMapLatitude, elevationAt, mulberry32 } from './terrain'
+import { assertValidMapLatitude, elevationAt } from './terrain'
+import { mulberry32 } from './random'
 
 // ---------------------------------------------------------------------------
 // Buildability
@@ -416,7 +417,8 @@ function pickKind(eligible: readonly DepositKindSpec[], roll: number): string {
  * Scatter mineral deposits deterministically across `terrain`.
  *
  * Determinism contract: `generateDeposits` is keyed off `terrain.seed` via the
- * `mulberry32` PRNG imported from `terrain.ts`, so the whole sim core shares one
+ * `mulberry32` PRNG imported from `random.ts` — the same shared construction
+ * `terrain.ts` seeds `generateTerrain` from — so the whole sim core shares one
  * seeded-PRNG construction. Identical `(terrain, options)` — which now includes
  * `terrain.latitude` — always yields a deep-equal deposit array, on any run or
  * process; a different `seed` yields a different PRNG stream and therefore,
