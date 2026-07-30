@@ -57,39 +57,39 @@ const SRC_DIR = join(import.meta.dirname, '../../src')
  *   when its chain lands, the chain hand-typed a literal instead.
  */
 const ACCEPTED_ORPHANS: readonly string[] = [
-  // --- Public API awaiting an application layer (aic-8tl.5) ---
-  //
-  // ELEVEN ENTRIES LEFT THIS LIST IN aic-hfb, and that ratchet movement IS what the bead
-  // delivered. `colony-start.ts` is the bridge from a scored `ReadyLanding` to a running
-  // `ColonyState`, and building it gave real production consumers to:
-  //   turn.createColony, world.generateWorld, world.buildabilityScorerFor,
-  //   world.depositCoords, landing.evaluateLanding, landing.resolveHullFootprint,
-  //   catalog.createCatalog, catalog.getStructureType, construction.queueConstruction,
-  //   construction.enqueueProject, power.energyPerTurnWh
-  // Do not re-add any of them without deleting the caller that wired them.
-  //
-  // `resolveTurn` is still the sim's front door and is still supposed to be called by an
-  // application layer that does not exist yet — aic-hfb deliberately did NOT resolve a turn
-  // inside the bridge, because starting a colony and advancing it are different operations.
-  'turn.resolveTurn',
   // Called only from inside `landing.ts` itself (by `evaluateLanding`), and this audit
   // counts cross-file callers only — so these are orphans by its definition, not by design.
   'landing.scoreLandingSite',
   'landing.validateLandingSite',
   'catalog.listStructureTypes',
 
-  // --- The colony-start bridge's own public surface (aic-8tl.5) ---
-  // The outermost entry points for the opening move. `startMission` composes the other two,
-  // but same-file callers do not count here. These are what the sim/UI adapter consumes.
-  'colony-start.buildColony',
-  'colony-start.evaluateLandingOn',
+  // --- Chain 1's authored catalog data, awaiting the build menu (aic-d8y.1.2) ---
+  // `catalog-data.ts` IS the player's build menu, and the sim/UI adapter that offers a
+  // build menu (aic-8tl.5) does not exist yet — so this is the "public API awaiting its
+  // caller" category, not a helper nobody wired. It is not pre-placed into the starting
+  // colony on purpose: chain 1 is buildable, not landed. When the adapter lands, this
+  // entry must be DELETED rather than left here.
+  'catalog-data.chainOneStructureSpecs',
+
   'colony-start.startMission',
 
   // --- Intended consumer is a chain bead not yet built ---
-  'scale.tileAreaForEdgeM2', // aic-ck0 / chain 1 berm cost
-  'scale.footprintAreaM2', // aic-ck0 / chain 1 berm cost
-  'scale.arealMassKg', // aic-ck0 / chain 1 berm cost
-  'scale.arealDensityKgPerM2', // aic-ck0 / chain 1 berm cost
+  //
+  // TWO ENTRIES LEFT THIS LIST IN aic-d8y.1.2, and that ratchet movement IS what closed
+  // aic-ck0. `src/sim/catalog-data.ts` derives the Shield Berm's 450 t of fill and 7.5 t
+  // of crust — and the Regolith Hopper's pile cap — through `scale.arealMassKg` and
+  // `scale.arealDensityKgPerM2`, so those two now have a real production consumer:
+  //   scale.arealMassKg, scale.arealDensityKgPerM2
+  // Do not re-add either without deleting the derivation that wired them; a hand-typed
+  // 450_000_000 is precisely what aic-ck0 says would otherwise pass every test.
+  //
+  // The two below are now reached IN PRODUCTION, but only from inside `scale.ts` itself
+  // (`arealMassKg` -> `footprintAreaM2` -> `tileAreaForEdgeM2`), and this audit counts
+  // cross-file callers only — so they are orphans by its definition rather than by design,
+  // the same category as `landing.scoreLandingSite` above. They are no longer decorative:
+  // the square law they implement is what makes the berm cost move with the tile edge.
+  'scale.tileAreaForEdgeM2',
+  'scale.footprintAreaM2',
   'buildability.eligibleDepositKinds', // chains 2 and 3 deposit-gated siting
   'construction.createProject',
   'construction.occupiedTiles',
@@ -105,9 +105,6 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // aic-5lq removed the hardcoded reactor constant in favour of a registry. The
   // registry's writer is authored catalog data, so nothing calls it yet.
   'generation.registerOutputModel',
-  // aic-gom.3's typed intent layer. Its caller is the sim/UI adapter (aic-8tl.5),
-  // which is the next bead in the playable-start chain.
-  'orders.applyOrders',
 ]
 
 interface Audit {

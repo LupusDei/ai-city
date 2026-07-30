@@ -56,7 +56,7 @@ Blocks all user stories.
       no deposit requirement); `sinter-press` (L-shape 3 tiles, `buildTurns: 6`, 30,000 W,
       produces 1,200,000 g plate/turn, consumes 1,400,000 g regolith/turn); `shield-berm`
       (skirt footprint around one habitat, 0 W, `buildTurns: 0` — material-gated,
-      `buildCost` = 450,000,000 g regolith + 7,500,000 g plate).
+      `buildCost` = 450,000,000 g regolith + 11,000,000 g plate).
       *Acceptance*: failing tests first in `tests/unit/catalog-data.test.ts` — happy (all three
       validate through the existing `createCatalog` and appear in declaration order), error
       (a malformed variant of each throws `RangeError` at the catalog boundary), edge (the
@@ -189,7 +189,7 @@ identically-built unrated habitat counts zero.
       crust (0.05 m at 1,500 kg/m³) over a 2×2 habitat's roof area — so the cost is **computed**
       from the tile edge, never typed in as 450 t.
       *Acceptance*: failing tests first in `tests/unit/scale.test.ts` — happy (at a 5 m tile the
-      derivation yields exactly 450,000,000 g regolith and 7,500,000 g plate), error (a
+      derivation yields exactly 450,000,000 g regolith and 11,000,000 g plate), error (a
       non-integer or non-positive tile edge is rejected), edge (**doubling the tile edge
       quadruples both costs** — the areal-scaling guard that stops a future tile-size
       ratification from silently desyncing the catalog from the map).
@@ -200,7 +200,7 @@ identically-built unrated habitat counts zero.
       *Acceptance*: failing tests first in `tests/unit/berm.test.ts` — happy (progress accrues
       over ~8 turns and completes), error (construction with an empty stockpile is a **clean
       refusal** — no partial deduction, no negative balance), edge (stockpiles at **exactly**
-      450,000,000 g and 7,500,000 g complete the berm and leave both at exactly zero; and one
+      450,000,000 g and 11,000,000 g complete the berm and leave both at exactly zero; and one
       gram short leaves the berm incomplete with delivered material intact). One test must
       cover **brownout mid-berm**: idling the Hopper or Press for several turns leaves the berm
       resumable with no silent loss.

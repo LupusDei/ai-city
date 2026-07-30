@@ -15,24 +15,20 @@
  *
  * Constitution §4 / spec 005 FR-002: no game logic in components. Two decisions are made
  * here and both are delegated: which seed this session uses (`./seed`, pure) and what
- * world that seed produces (`generateWorld`, the sim's own composition seam). Neither
- * this file nor the canvas computes anything about the game.
+ * that seed produces (`beginSurvey`, the sim/UI adapter). Neither this file nor the canvas
+ * computes anything about the game.
+ *
+ * aic-8tl.5: this file no longer calls `generateWorld` itself. Every sim state transition
+ * now goes through `./state/game-state` — the one intent-dispatch surface (FR-004) — and
+ * `tests/unit/app-boundary.test.ts` fails if any component under `src/app/` reaches past
+ * it. The survey screen that replaces this shell should hold the adapter's `GameState` in
+ * `useState` and drive it with `dispatch`, never touch the sim directly.
  */
 import { useState, type JSX } from 'react'
 
-import { generateWorld } from '../sim/world'
 import { TerrainCanvas } from './canvas/TerrainCanvas'
 import { resolveSeed } from './seed'
-
-/**
- * The ratified colony map: 64x64 tiles, 320 m on a side at `TILE_EDGE_METRES`.
- *
- * Matches the sim's own default in `turn.ts` (`DEFAULT_GRID_DIMENSION`), which is private
- * to that module. Restated rather than exported-and-imported because the survey screen
- * (`aic-8tl.2`) is the layer that should own map sizing once it exists, and threading a
- * constant out of the turn loop to serve a placeholder would be the wrong seam to open.
- */
-const MAP_DIMENSION = 64
+import { beginSurvey } from './state/game-state'
 
 export interface AppProps {
   /** URL query string (`location.search`), injected so the shell stays testable. */
@@ -53,11 +49,12 @@ export interface AppProps {
  */
 export function App({ search, random = Math.random }: AppProps): JSX.Element {
   const [seed] = useState(() => resolveSeed(search, random))
-  // Generated ONCE per session, in lazy state, for the same reason the seed is: AC-1.3
+  // Surveyed ONCE per session, in lazy state, for the same reason the seed is: AC-1.3
   // requires one seed to yield one terrain, and a world regenerated on every render would
   // be wasted work at best and — the moment anything here becomes stateful — a different
-  // map between two renders of the same session at worst.
-  const [world] = useState(() => generateWorld(MAP_DIMENSION, MAP_DIMENSION, seed))
+  // map between two renders of the same session at worst. `beginSurvey` is documented as
+  // exactly-once-per-session for that reason.
+  const [game] = useState(() => beginSurvey({ seed }))
 
   return (
     <main data-testid="survey-screen">
@@ -65,7 +62,7 @@ export function App({ search, random = Math.random }: AppProps): JSX.Element {
       <p>
         Mission seed: <span data-testid="seed-readout">{seed}</span>
       </p>
-      <TerrainCanvas world={world} />
+      <TerrainCanvas world={game.world} />
       <p>
         Elevation is shaded low-to-high; steep ground darkens toward basalt, so clean
         iron-oxide red is buildable. Deposits: pale diamonds are silica, blue discs are ice.

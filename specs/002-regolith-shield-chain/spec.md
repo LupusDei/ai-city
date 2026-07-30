@@ -115,7 +115,7 @@ Costs, derived arealy from the 5 m tile:
 
 - Bulk fill: 3 m of regolith at ~1.5 g/cm³ = 450 g/cm² = 4,500 kg/m²; × 100 m² (a 2×2
   habitat at 5 m tiles) = **450,000,000 g = 7.5 Hopper-turns**.
-- Sintered crust: 0.05 m × 100 m² × 1,500 kg/m³ = **7,500,000 g = 6.25 Press-turns**. The
+- Sintered crust: 0.05 m × 100 m² × 1,500 kg/m³ = **11,000,000 g = 9.2 Press-turns**. The
   crust holds the loose fill against dust mobilisation and slow slope creep — not against
   wind loading; the Martian atmosphere is ~610 Pa and carries very little force.
 
@@ -140,7 +140,7 @@ unrated habitat as zero.
 1. **Given** a completed habitat with an adjacent berm site and stockpiles filling over time,
    **When** turns resolve, **Then** the berm accumulates delivered material toward its
    `buildCost` across multiple turns and reports progress each turn.
-2. **Given** a berm that has received exactly 450,000,000 g of regolith and 7,500,000 g of
+2. **Given** a berm that has received exactly 450,000,000 g of regolith and 11,000,000 g of
    plate, **When** the turn resolves, **Then** the berm completes, both stockpiles land at
    exactly zero, and the habitat becomes rated.
 3. **Given** a built but unrated habitat with capacity 8, **When** the mission is evaluated,
@@ -176,12 +176,12 @@ plausibly introduce.
 - **Habitat demolished or overwritten after being rated** — readiness drops, and the berm
   must not survive as an orphan rating that a newly built module inherits for free.
 - **Stockpile exactly equal to the cost** — boundary at exactly 450,000,000 g regolith and
-  7,500,000 g plate: must succeed and leave both stockpiles at exactly zero. Not fail by one
+  11,000,000 g plate: must succeed and leave both stockpiles at exactly zero. Not fail by one
   gram, not go negative. (Distinct from, and tested alongside, the one-gram-short case.)
 - **Empty stockpile** — berm construction with zero regolith is a clean refusal, never a
   partial deduction or a negative balance.
 - **Brownout mid-berm** — a Hopper or Press idled mid-supply leaves the berm resumable with
-  all delivered material intact. A berm is only 7.5 turns, so a lost partial is small in
+  all delivered material intact. A berm is only 11 turns, so a lost partial is small in
   isolation — and exactly the kind of small silent loss that never gets reported as a bug.
 - **Stockpile overflow** — a Hopper producing 60 t/turn into a full stockpile handles the
   excess by the one documented rule (cap-and-report) and the cycle report shows it. Silent
@@ -219,7 +219,7 @@ plausibly introduce.
   of sintered plate per turn at a 30,000 W draw, and MUST idle with a distinct reported reason
   for input starvation vs. power starvation.
 - **FR-008**: The Shield Berm MUST carry a one-time `buildCost` of 450,000,000 g regolith and
-  7,500,000 g sintered plate, **derived from the tile-edge constant** rather than literal, and
+  11,000,000 g sintered plate, **derived from the tile-edge constant** rather than literal, and
   MUST draw 0 W.
 - **FR-009**: Berm construction MUST accumulate delivered material across turns and MUST be
   resumable with delivered material intact after any interruption.
@@ -243,7 +243,7 @@ plausibly introduce.
 - **Sinter Press** — catalog entry `sinter-press`. L-shape (3 tiles), 6 build turns, 30,000 W,
   produces 1,200,000 g plate/turn, consumes 1,400,000 g regolith/turn.
 - **Shield Berm** — catalog entry `shield-berm`. Skirt footprint around one habitat, 0 W,
-  material-gated (`buildTurns: 0`), `buildCost` = 450,000,000 g regolith + 7,500,000 g plate.
+  material-gated (`buildTurns: 0`), `buildCost` = 450,000,000 g regolith + 11,000,000 g plate.
 - **Berm progress** — per-instance delivered-material state plus the id of the habitat it
   rates.
 - **Rated habitat** — a completed habitat with a completed adjacent berm. The only kind that
@@ -252,7 +252,7 @@ plausibly introduce.
 ## Success Criteria
 
 - **SC-001**: One Hopper plus one Press (42 kW = 105% of one reactor) supplies one completed
-  berm in exactly 7.5 Hopper-turns and 6.25 Press-turns, with no idle-waiting stage.
+  berm in exactly 7.5 Hopper-turns and 9.2 Press-turns, with no idle-waiting stage.
 - **SC-002**: An unrated habitat contributes exactly 0 to `totalHabitatCapacity`; the same
   habitat once rated contributes its full `habitatCapacity`.
 - **SC-003**: Doubling `TILE_EDGE_METERS` quadruples the derived berm cost, asserted by test.
