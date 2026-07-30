@@ -202,7 +202,7 @@ plausibly introduce.
 
 - **FR-001**: The ledger MUST recognise `regolith` and `sinteredPlate` as resource kinds
   denominated in **integer grams**, and electricity in **integer watts** (instantaneous) and
-  **integer watt-seconds** (energy). No floats anywhere in the ledger; kWh and tonnes are
+  **integer watt-hours** (energy). No floats anywhere in the ledger; kWh and tonnes are
   display-boundary conversions only.
 - **FR-002**: The three new structures MUST be added as **catalog data only**. Adding them
   MUST NOT introduce a new code branch in `src/sim/placement.ts` or `src/sim/ledger.ts`.

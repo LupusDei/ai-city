@@ -18,7 +18,7 @@
   below start with the failing test.
 - **Minimum test counts**: 3 tests per public method (happy / error / edge), 2 per handler.
 - **Coverage gates**: lines 80%, branches 70%, functions 60% (`npm run test:coverage`).
-- **Determinism**: integer base units only — grams, watts, watt-seconds. **No floats in the
+- **Determinism**: integer base units only — grams, watt-hours. **No floats in the
   ledger.** No `Math.random`, `Date.now`, `new Date`, or Object/Map/Set key-order reliance in
   `src/sim/`.
 - **Layered architecture (constitution §4)**: sim logic in `src/sim/`, zero React imports, no
@@ -44,7 +44,7 @@ Blocks all user stories.
 
 - [ ] **T001** Add the resource-kind registry with integer base units in `src/sim/resources.ts`
       — `regolith` (grams), `sinteredPlate` (grams), `electricity` (watts instantaneous,
-      watt-seconds energy), each with a display scale (t, kW, kWh) applied only at the display
+      watt-hours energy), each with a display scale (t, kW, kWh) applied only at the display
       boundary.
       *Acceptance*: failing tests first in `tests/unit/resources.test.ts` — happy (a declared
       kind returns its base unit and scale), error (an unknown kind is rejected, not silently

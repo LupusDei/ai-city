@@ -74,7 +74,7 @@ mid-build" belongs to proposals 2 and 3, not here.
 **Testing**: Vitest, `@vitest/coverage-v8`. Gates: lines 80%, branches 70%, functions 60%
 **Storage**: In-memory pure data structures; no persistence in scope
 **Constraints**:
-- **Determinism** — integer base units only (grams, watts, watt-seconds). No floats in the
+- **Determinism** — integer base units only (grams, watt-hours). No floats in the
   ledger. No `Math.random`, `Date.now`, `new Date`, or reliance on Object/Map/Set key order in
   `src/sim/` (`tests/unit/boundary.test.ts` enforces this automatically).
 - **Layered architecture** (constitution §4) — sim logic in `src/sim/`, zero React imports,
