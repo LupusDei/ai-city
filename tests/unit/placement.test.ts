@@ -23,6 +23,29 @@ function cloneGrid(grid: Grid): Grid {
 }
 
 /**
+ * Apply a placement expected to succeed, unwrapping `ApplyResult` down to the
+ * resulting `Grid`.
+ *
+ * `applyPlacement` returns a typed rejection (not a bare `Grid`) whenever the
+ * placement's tiles are no longer valid on the grid being applied to — see
+ * `aic-a00.13`. Most tests here are exercising something else entirely (e.g.
+ * "does validatePlacement report occupancy correctly") and just need a
+ * fixture grid with a structure already on it, so an unexpected rejection at
+ * this point means the FIXTURE is broken, not the behaviour under test —
+ * throwing immediately surfaces that instead of a confusing assertion
+ * failure three lines later.
+ */
+function applyValid(grid: Grid, structureId: string, placement: ValidPlacement): Grid {
+  const result = applyPlacement(grid, structureId, placement)
+  if (!result.ok) {
+    throw new Error(
+      `test setup failed: expected applyPlacement to succeed, got rejection: ${result.reason}`,
+    )
+  }
+  return result.grid
+}
+
+/**
  * Builds a validated StructureType via the real catalog boundary rather than
  * hand-rolling one, so test fixtures exercise the same validation path
  * production code does (per the "real output shapes, not just type
@@ -219,7 +242,7 @@ describe('validatePlacement — occupied', () => {
     const empty = createGrid(4, 3)
     const first = validatePlacement(empty, structureType(), { x: 1, y: 1 })
     if (!first.ok) throw new Error('fixture setup failed')
-    const occupiedGrid = applyPlacement(empty, 'structure-a', first)
+    const occupiedGrid = applyValid(empty, 'structure-a', first)
 
     const result = validatePlacement(occupiedGrid, structureType(), { x: 1, y: 1 })
     expect(result).toEqual({
@@ -236,7 +259,7 @@ describe('validatePlacement — occupied', () => {
     const empty = createGrid(4, 3)
     const first = validatePlacement(empty, structureType(), { x: 2, y: 0 })
     if (!first.ok) throw new Error('fixture setup failed')
-    const occupiedGrid = applyPlacement(empty, 'structure-a', first)
+    const occupiedGrid = applyValid(empty, 'structure-a', first)
 
     // L-shape anchored at (1,0): tiles (1,0) free, (2,0) OCCUPIED, (1,1) free.
     const result = validatePlacement(occupiedGrid, lShape(), { x: 1, y: 0 })
@@ -252,7 +275,7 @@ describe('validatePlacement — occupied', () => {
     const empty = createGrid(4, 3)
     const first = validatePlacement(empty, structureType(), { x: 0, y: 0 })
     if (!first.ok) throw new Error('fixture setup failed')
-    const occupiedGrid = applyPlacement(empty, 'structure-a', first)
+    const occupiedGrid = applyValid(empty, 'structure-a', first)
 
     const result = validatePlacement(occupiedGrid, structureType(), { x: 0, y: 0 })
     if (result.ok) throw new Error('expected rejection')
@@ -263,7 +286,7 @@ describe('validatePlacement — occupied', () => {
     const empty = createGrid(4, 3)
     const first = validatePlacement(empty, structureType(), { x: 2, y: 0 })
     if (!first.ok) throw new Error('fixture setup failed')
-    const occupiedGrid = applyPlacement(empty, 'structure-a', first)
+    const occupiedGrid = applyValid(empty, 'structure-a', first)
     const before = cloneGrid(occupiedGrid)
 
     validatePlacement(occupiedGrid, lShape(), { x: 1, y: 0 })
@@ -276,7 +299,7 @@ describe('applyPlacement', () => {
   function place(grid: Grid, id: string, type: StructureType, anchor: { x: number; y: number }) {
     const result = validatePlacement(grid, type, anchor)
     if (!result.ok) throw new Error('fixture setup failed: expected a valid placement')
-    return { grid: applyPlacement(grid, id, result), placement: result as ValidPlacement }
+    return { grid: applyValid(grid, id, result), placement: result as ValidPlacement }
   }
 
   it('should occupy every footprint tile, not just the anchor', () => {
@@ -339,5 +362,81 @@ describe('applyPlacement', () => {
 
     expect(afterSecond.tiles.find((t) => t.x === 0 && t.y === 0)?.occupantId).toBe('structure-a')
     expect(afterSecond.tiles.find((t) => t.x === 2 && t.y === 0)?.occupantId).toBe('structure-b')
+  })
+})
+
+describe('applyPlacement — grid identity hazard (regression for aic-a00.13)', () => {
+  it('should report a typed out-of-bounds rejection, not silently no-op, when applied to a grid smaller than the one the placement was validated against', () => {
+    const bigGrid = createGrid(10, 10)
+    const farAnchor = { x: 8, y: 8 }
+    const result = validatePlacement(bigGrid, structureType(), farAnchor)
+    if (!result.ok) throw new Error('fixture setup failed: expected placement valid on the big grid')
+
+    // A DIFFERENT, smaller grid: (8,8) is not even a real tile on it. Nothing
+    // about `result`'s type prevents handing it to this grid — applyPlacement
+    // itself must catch the mismatch.
+    const smallGrid = createGrid(4, 3)
+    const applied = applyPlacement(smallGrid, 'structure-a', result)
+
+    expect(applied).toEqual({ ok: false, reason: 'out-of-bounds', tile: { x: 8, y: 8 } })
+  })
+
+  it('should report a typed occupied rejection, not silently clobber the existing occupant, when applied to a same-size grid where a footprint tile is already claimed by something else', () => {
+    // Same dimensions as the grid the placement was validated against, so the
+    // "x,y" string-key match the old implementation relied on WOULD succeed —
+    // this is the case a bounds-only fix would miss entirely.
+    const gridA = createGrid(4, 3)
+    const result = validatePlacement(gridA, structureType(), { x: 1, y: 1 })
+    if (!result.ok) throw new Error('fixture setup failed: expected placement valid on gridA')
+
+    // gridB: same shape, but (1,1) already belongs to a different structure.
+    const emptyB = createGrid(4, 3)
+    const claim = validatePlacement(emptyB, structureType(), { x: 1, y: 1 })
+    if (!claim.ok) throw new Error('fixture setup failed: expected claim valid on gridB')
+    const gridB = applyValid(emptyB, 'existing-structure', claim)
+
+    const applied = applyPlacement(gridB, 'structure-a', result)
+
+    expect(applied).toEqual({
+      ok: false,
+      reason: 'occupied',
+      tile: { x: 1, y: 1 },
+      occupantId: 'existing-structure',
+    })
+    // The pre-existing occupant must survive untouched, not get overwritten.
+    expect(gridB.tiles.find((t) => t.x === 1 && t.y === 1)?.occupantId).toBe('existing-structure')
+  })
+
+  it('should leave the target grid completely unmutated when apply is rejected due to a grid mismatch', () => {
+    const bigGrid = createGrid(10, 10)
+    const result = validatePlacement(bigGrid, structureType(), { x: 8, y: 8 })
+    if (!result.ok) throw new Error('fixture setup failed: expected placement valid on the big grid')
+
+    const smallGrid = createGrid(4, 3)
+    const before = cloneGrid(smallGrid)
+
+    applyPlacement(smallGrid, 'structure-a', result)
+
+    expect(smallGrid).toEqual(before)
+  })
+
+  it('should still succeed when applied to a different grid on which every footprint tile happens to remain free', () => {
+    // The fix re-checks tile validity on the ACTUAL target grid rather than
+    // rejecting merely because the grid object differs from the one used at
+    // validation time — a placement that is still genuinely valid elsewhere
+    // must keep working (e.g. a turn resolver replaying a queued action
+    // against a freshly-produced grid of identical shape).
+    const gridA = createGrid(4, 3)
+    const result = validatePlacement(gridA, structureType(), { x: 1, y: 1 })
+    if (!result.ok) throw new Error('fixture setup failed: expected placement valid on gridA')
+
+    const gridB = createGrid(4, 3) // distinct object, same shape, still all-free
+
+    const applied = applyPlacement(gridB, 'structure-a', result)
+
+    expect(applied.ok).toBe(true)
+    if (applied.ok) {
+      expect(applied.grid.tiles.find((t) => t.x === 1 && t.y === 1)?.occupantId).toBe('structure-a')
+    }
   })
 })
