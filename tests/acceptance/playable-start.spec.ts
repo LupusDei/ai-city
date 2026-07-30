@@ -129,7 +129,9 @@ test.describe('US1 — launch and survey', () => {
   }) => {
     await page.goto('/')
     await expect(page.locator(at(ID.surveyScreen))).toBeVisible()
-    await expect(page.locator(at(ID.seedReadout))).not.toBeEmpty()
+    // A generated seed is a number, so require one. `not.toBeEmpty()` would be satisfied
+    // by the literal word "seed" or a placeholder.
+    await expect(page.locator(at(ID.seedReadout))).toContainText(/\d/)
   })
 })
 
@@ -251,8 +253,10 @@ test.describe('US3 — the mission begins from the chosen landing', () => {
     // Word-boundary regex, not a substring: "10" CONTAINS "0", so a habitat capacity
     // of 10 would have satisfied `toContainText('0')`. Same class of hole as AC-edge's.
     await expect(page.locator(at(ID.habitatCapacity))).toContainText(/\b0\b/)
+    // A digit, not mere non-emptiness: an em-dash placeholder satisfies `not.toBeEmpty()`,
+    // which is exactly how AC-2.1 managed to assert nothing at all before it was fixed.
     for (const id of [ID.powerGeneration, ID.powerDraw, ID.dronesOnShift]) {
-      await expect(page.locator(at(id))).not.toBeEmpty()
+      await expect(page.locator(at(id))).toContainText(/\d/)
     }
   })
 
@@ -290,26 +294,54 @@ test.describe('US4 — the first turn resolves', () => {
     await openSurvey(page)
     await landAndBegin(page)
     await page.locator(at(ID.endCycle)).click()
-    // The golden trace shows a brownout on turn 1 with one reactor, and energy vented
-    // every turn under the no-storage ruling. Both must be visible to the player: a
-    // number the player cannot see is a mechanic the player cannot learn.
-    await expect(page.locator(at(ID.ventedEnergy))).not.toBeEmpty()
-    const cut = page.locator(at(ID.brownoutCutLine))
-    if ((await cut.count()) > 0) await expect(cut).not.toBeEmpty()
+    // STRENGTHENED. This previously read:
+    //     await expect(ventedEnergy).not.toBeEmpty()
+    //     if ((await cut.count()) > 0) await expect(cut).not.toBeEmpty()
+    // Both halves were weak and the second was the worst assertion in the file: a
+    // CONDITIONAL that silently does nothing when the element is absent. Delete the cut
+    // line entirely and the test still passes. And `not.toBeEmpty()` is satisfied by an
+    // em dash, so a screen that rendered a permanent placeholder for both figures would
+    // have been green — while the player learned nothing, which is the exact thing these
+    // readouts exist to prevent.
+    //
+    // The colony opens with ONE reactor against 33 drones, so a brownout on turn 1 is
+    // certain, and the no-storage ruling guarantees energy is vented every turn. Both are
+    // therefore assertable as REAL NUMBERS rather than mere presence.
+    await expect(page.locator(at(ID.ventedEnergy))).toContainText(/\d/)
+    await expect(page.locator(at(ID.brownoutCutLine))).toContainText(/\d/)
   })
 
-  test('AC-edge double-clicking End Cycle advances exactly one turn', async ({ page }) => {
+  test('AC-edge two clicks delivered in ONE tick advance exactly one turn', async ({
+    page,
+  }) => {
+    // REWRITTEN, because the previous version could not fail. It used Playwright's
+    // `dblclick()`, and I mutation-tested that: disabling the click-count guard, then also
+    // the in-flight latch, then ALSO the adapter's stale-token refusal — all three off —
+    // and it still passed. A probe explained why: `dblclick()` delivers only one click to
+    // the React handler in this app, so the gesture never exercises the hazard. The test
+    // asserted a behaviour that was true by construction, which is the definition of a
+    // decorative test, and it was counted as coverage for three guards it could not see.
+    //
+    // Two SEPARATE clicks are not the hazard either — they legitimately advance two turns,
+    // because two independent gestures naming different turns are two real intents. Probed
+    // and confirmed: two clicks give "3 / 278", which is correct.
+    //
+    // The actual hazard is two click events delivered in a SINGLE tick — a duplicated
+    // handler, a stale closure, StrictMode's double-invoke, or a synthetic dispatch. That
+    // is what the guards defend, so that is what this now fires. Note the ops screen's own
+    // finding: a synthetic click reaches even a DISABLED button, so `disabled` alone is not
+    // the defence and the handler predicate is load-bearing.
     await openSurvey(page)
     await landAndBegin(page)
-    const end = page.locator(at(ID.endCycle))
-    await end.dblclick()
-    // CORRECTED. This previously asserted `toContainText('2')`, which is a SUBSTRING
-    // match — and "3 / 278" contains a '2' via the 278. So the exact defect this test
-    // exists to catch (a double-fire advancing two turns) would have PASSED it. The test
-    // was decorative. Found by the ops-screen agent, not by me.
-    //
-    // Asserted two ways now: the exact readout, and turns-remaining, where 276 and 275
-    // cannot be confused for one another by any substring accident.
+    await expect(page.locator(at(ID.turnsRemaining))).toHaveText('277')
+
+    await page.evaluate((sel: string) => {
+      const button = document.querySelector(sel)
+      if (button === null) throw new Error(`no ${sel}`)
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+    }, at(ID.endCycle))
+
     await expect(page.locator(at(ID.turnReadout))).toHaveText('2 / 278')
     await expect(page.locator(at(ID.turnsRemaining))).toHaveText('276')
   })
