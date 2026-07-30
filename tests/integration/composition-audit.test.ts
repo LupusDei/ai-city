@@ -37,6 +37,7 @@ import { describe, expect, it } from 'vitest'
 import { stripNonCode } from '../support/strip-non-code'
 
 const SIM_DIR = join(import.meta.dirname, '../../src/sim')
+const SRC_DIR = join(import.meta.dirname, '../../src')
 
 /**
  * Exports with no production consumer that are ACCEPTED, each for a stated reason.
@@ -128,6 +129,41 @@ function readSimSources(): ReadonlyMap<string, string> {
 }
 
 /**
+ * Every production file that could legitimately CALL a sim export — the whole of
+ * `src/`, recursively, including `.tsx`.
+ *
+ * `aic-8tl.1` exposed a real hole in this gate, and it was mine. The audit read
+ * `src/sim/` for both halves — exports AND callers — so the application layer was
+ * invisible to it. The consequence was worse than a missed orphan: spec 005 defines
+ * "the engine has ignition" (SC-003) as `generateWorld`, `evaluateLanding`,
+ * `createColony` and `resolveTurn` LEAVING the allowlist, and as originally written
+ * they never could. `App.tsx` calling `generateWorld` is exactly the wiring the
+ * project has failed to achieve three times, and the gate measuring that wiring
+ * would have reported "still orphaned" forever while the game visibly worked.
+ *
+ * A gate that cannot observe success is as broken as one that cannot observe
+ * failure — it just fails quietly instead of loudly.
+ *
+ * The asymmetry is deliberate: only `src/sim/` exports are AUDITED (the sim is what
+ * must not rot into unreachable code), but a caller anywhere under `src/` counts.
+ */
+function readProductionSources(): ReadonlyMap<string, string> {
+  const source = new Map<string, string>()
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      const key = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) walk(path, key)
+      else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+        source.set(key, readFileSync(path, 'utf8'))
+      }
+    }
+  }
+  walk(SRC_DIR, '')
+  return source
+}
+
+/**
  * The audit itself, over an arbitrary `filename -> source text` map.
  *
  * `aic-7mb`: this used to run its regexes over RAW file text, so a call-shaped
@@ -141,9 +177,14 @@ function readSimSources(): ReadonlyMap<string, string> {
  * names are called — run on that stripped text, so a fake export declaration or
  * a fake call hidden in prose can affect neither.
  */
-function auditModules(source: ReadonlyMap<string, string>): Audit {
+function auditModules(
+  source: ReadonlyMap<string, string>,
+  callerSource: ReadonlyMap<string, string> = source,
+): Audit {
   const codeOnly = new Map<string, string>()
   for (const [file, text] of source) codeOnly.set(file, stripNonCode(text))
+  const callerCode = new Map<string, string>()
+  for (const [file, text] of callerSource) callerCode.set(file, stripNonCode(text))
 
   const orphans: string[] = []
   const wired: string[] = []
@@ -157,8 +198,10 @@ function auditModules(source: ReadonlyMap<string, string>): Audit {
       const name = match[1]
       if (name === undefined) continue
       let callers = 0
-      for (const [otherFile, otherText] of codeOnly) {
-        if (otherFile === file) continue
+      for (const [otherFile, otherText] of callerCode) {
+        // Skip the defining file. Caller keys are `src/`-relative ("sim/scale.ts")
+        // while export keys are bare ("scale.ts"), so compare by suffix.
+        if (otherFile === file || otherFile.endsWith(`/${file}`)) continue
         // A call, not a mention: the name followed by an open paren. Import lines and
         // prose references do not match, which is what keeps a comment about a
         // deleted function from making it look alive.
@@ -171,7 +214,7 @@ function auditModules(source: ReadonlyMap<string, string>): Audit {
 }
 
 function auditComposition(): Audit {
-  return auditModules(readSimSources())
+  return auditModules(readSimSources(), readProductionSources())
 }
 
 describe('composition audit (the ratchet)', () => {
@@ -220,6 +263,49 @@ describe('composition audit (the ratchet)', () => {
  * tree is still exercised by the `describe` block above; these pin the
  * specific defect and its fix.
  */
+describe('composition audit — the app layer counts as a caller (aic-8tl.1)', () => {
+  // Regression test for a hole in THIS GATE, found by the canvas-renderer bead.
+  // The audit originally read src/sim/ for BOTH halves — exports and callers — so the
+  // application layer was invisible to it. That is worse than a missed orphan: spec
+  // 005's SC-003 defines "the engine has ignition" as four sim entry points LEAVING
+  // the allowlist, and as written they never could, because the app calling them did
+  // not count. A gate that cannot observe success is as broken as one that cannot
+  // observe failure; it just fails quietly instead of loudly.
+  it('should count a call from a .tsx app file as production wiring', () => {
+    const { wired, orphans } = auditModules(
+      new Map([['world.ts', 'export function generateWorld(): number {\n  return 1\n}\n']]),
+      new Map([
+        ['sim/world.ts', 'export function generateWorld(): number {\n  return 1\n}\n'],
+        ['app/App.tsx', "import { generateWorld } from '../sim/world'\nconst w = generateWorld()\n"],
+      ]),
+    )
+    expect(wired).toContain('world.generateWorld')
+    expect(orphans).not.toContain('world.generateWorld')
+  })
+
+  it('should still see an export with no caller anywhere in src as an orphan', () => {
+    // Non-vacuity: proves the test above is not passing simply because everything
+    // now looks wired.
+    const { orphans } = auditModules(
+      new Map([['world.ts', 'export function generateWorld(): number {\n  return 1\n}\n']]),
+      new Map([
+        ['sim/world.ts', 'export function generateWorld(): number {\n  return 1\n}\n'],
+        ['app/App.tsx', "const unrelated = 1\n"],
+      ]),
+    )
+    expect(orphans).toContain('world.generateWorld')
+  })
+
+  it('should not count the defining file as its own caller across differing key shapes', () => {
+    // Export keys are bare ("world.ts"); caller keys are src-relative
+    // ("sim/world.ts"). A naive equality check would fail to skip the definition and
+    // report every export as wired to itself — silently disabling the whole gate.
+    const body = 'export function generateWorld(): number {\n  return generateWorld()\n}\n'
+    const { orphans } = auditModules(new Map([['world.ts', body]]), new Map([['sim/world.ts', body]]))
+    expect(orphans).toContain('world.generateWorld')
+  })
+})
+
 describe('composition audit — caller detection ignores comments and literals (aic-7mb)', () => {
   it('should NOT count a call appearing only inside a // comment as wiring', () => {
     const { orphans, wired } = auditModules(
