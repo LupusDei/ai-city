@@ -77,6 +77,15 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   'catalog.listStructureTypes',
 
   // --- Intended consumer is a chain bead not yet built ---
+  // generation.registerOutputModel (aic-a00.18): the extension point itself. This file
+  // only counts CROSS-FILE callers, and generation.ts's own three built-in curves
+  // (constant, solarDecay, radioisotopeDecay) register themselves inside generation.ts
+  // at module load — a REAL production call, just one this scanner skips by design.
+  // A cross-file call appears once a real solar/RTG structure ships in catalog data
+  // naming a curve registered elsewhere (spec 003 chain 2, not yet built).
+  // tests/integration/generation-seam.test.ts proves the registry works end to end
+  // through resolveTurn today by registering and using an invented kind.
+  'generation.registerOutputModel',
   'scale.tileAreaForEdgeM2', // aic-ck0 / chain 1 berm cost
   'scale.footprintAreaM2', // aic-ck0 / chain 1 berm cost
   'scale.arealMassKg', // aic-ck0 / chain 1 berm cost

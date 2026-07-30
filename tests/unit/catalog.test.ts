@@ -8,6 +8,10 @@ import { DEFAULT_DEPOSIT_KINDS } from '../../src/sim/buildability'
 // Read-only, for the priorityClass tests: the catalog stores a structure's brownout
 // priority as authored data, and `brownout.ts` owns what the values MEAN.
 import { PRIORITY_DEFAULT, PRIORITY_HABITAT } from '../../src/sim/brownout'
+// Read-only, for the powerOutputModel default test: `catalog.ts` imports this same
+// constant to normalise an unauthored field, so the test asserts against the ONE
+// spelling rather than restating the string 'constant' itself.
+import { CONSTANT_OUTPUT_KIND } from '../../src/sim/generation'
 
 /** A minimal valid spec; individual tests override just the field under test. */
 function spec(overrides: Partial<StructureTypeSpec> = {}): StructureTypeSpec {
@@ -932,6 +936,45 @@ describe('createCatalog — priorityClass', () => {
     expect(() => createCatalog([spec({ priorityClass: -1 })])).toThrow(
       /habitat-module.*priorityClass/,
     )
+  })
+})
+
+// aic-a00.18: `powerOutputModel` names a curve `generation.ts` registers and
+// interprets — this module only stores the name and its non-`{}`-shaped default,
+// exactly as it does for `priorityClass` (owned by `brownout.ts`).
+describe('createCatalog — powerOutputModel', () => {
+  it('should carry an authored power output model name through to the validated type', () => {
+    const catalog = createCatalog([spec({ powerOutputModel: 'solarDecay' })])
+    expect(getStructureType(catalog, 'habitat-module')?.powerOutputModel).toBe('solarDecay')
+  })
+
+  it('should default an unauthored power output model to CONSTANT_OUTPUT_KIND', () => {
+    // Same normalise-optionals contract as priorityClass/buildCost/siting: authors stay
+    // terse (nothing to write for a structure whose output never moves), and every
+    // consumer — here, `generation.ts`'s `currentOutputWh` — reads exactly one shape
+    // and never writes `type.powerOutputModel ?? CONSTANT_OUTPUT_KIND` itself.
+    expect(getStructureType(createCatalog([spec()]), 'habitat-module')?.powerOutputModel).toBe(
+      CONSTANT_OUTPUT_KIND,
+    )
+  })
+
+  it('should reject an empty power output model name', () => {
+    expect(() => createCatalog([spec({ powerOutputModel: '' })])).toThrow(RangeError)
+  })
+
+  it('should name the structure and the field when the power output model name is empty', () => {
+    expect(() => createCatalog([spec({ powerOutputModel: '' })])).toThrow(
+      /habitat-module.*powerOutputModel/,
+    )
+  })
+
+  it('should NOT check that the named kind is actually registered — that is generation.ts\'s job, at resolve time', () => {
+    // Mirrors `siting.requiresDeposit`'s identical open-key contract: this module
+    // cannot know what `generation.ts`'s registry currently holds, so an unregistered
+    // name is legal DATA here and only fails later, at `currentOutputWh`.
+    expect(() =>
+      createCatalog([spec({ powerOutputModel: 'a-kind-nothing-has-registered-yet' })]),
+    ).not.toThrow()
   })
 })
 
