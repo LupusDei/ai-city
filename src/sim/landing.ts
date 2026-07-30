@@ -42,11 +42,22 @@
  *
  * - Hull footprints reuse `grid.ts`'s `Coord`/`Grid`/`isInBounds` directly
  *   rather than routing through `catalog.ts`/`placement.ts`'s `StructureType`
- *   machinery. A landed hull is not a buildable structure (it has no build
- *   time, no catalog entry, no occupant bookkeeping requirement at this
- *   stage) — forcing it through the structure-catalog boundary would couple
- *   this module to a data shape (`StructureTypeSpec`) designed for a different
- *   concern, for no benefit.
+ *   machinery. A landed hull is not a BUILDABLE structure — it has no build
+ *   time and is never offered in the player's build menu — so forcing site
+ *   SCORING through the structure-catalog boundary would couple this module to
+ *   a data shape (`StructureTypeSpec`) designed for a different concern, for no
+ *   benefit. That still holds.
+ *
+ *   Note the correction, though (aic-hfb): an earlier version of this note also
+ *   said a hull has "no occupant bookkeeping requirement at this stage", and
+ *   that stage is over. Once a landing is CONFIRMED, `colony-start.ts` gives
+ *   each hull a validated `StructureType` with `buildTurns: 0` and places it
+ *   through the ordinary construction path, so the hulls really do occupy grid
+ *   tiles and a later structure cannot be built on top of one. The division is
+ *   that this module scores a candidate site and never mutates anything, while
+ *   `colony-start.ts` owns what a hull BECOMES once it is down. Corrected rather
+ *   than deleted, because a comment describing a stage the code has moved past
+ *   is the defect class that hid aic-c1p for a day.
  *
  * This module is pure: no I/O, no clock, no mutation of any input, and (per
  * the project's sim/renderer boundary test) no `Math.random`/`Date.now`/
@@ -172,8 +183,12 @@ export type LandingRejection =
 
 /**
  * A landing site that passed validation, carrying every absolute tile each
- * hull would occupy so a caller (or `applyLanding`-style code a future bead
- * might add) never has to re-derive or re-validate them.
+ * hull would occupy so a caller never has to re-derive or re-validate them.
+ *
+ * That caller now exists: `colony-start.ts`'s `buildColony` writes exactly these
+ * tiles into the colony's grid. Carrying the tiles rather than just the anchors
+ * is what makes the tiles the colony OCCUPIES provably the same tiles the player
+ * was SHOWN and the score was computed over.
  */
 export interface LandingValidationSuccess {
   readonly ok: true

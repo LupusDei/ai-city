@@ -56,54 +56,57 @@ const SIM_DIR = join(import.meta.dirname, '../../src/sim')
  *   when its chain lands, the chain hand-typed a literal instead.
  */
 const ACCEPTED_ORPHANS: readonly string[] = [
-  // --- Public API awaiting an application layer (aic-hfb) ---
-  'turn.createColony',
+  // --- Public API awaiting an application layer (aic-8tl.5) ---
+  //
+  // ELEVEN ENTRIES LEFT THIS LIST IN aic-hfb, and that ratchet movement IS what the bead
+  // delivered. `colony-start.ts` is the bridge from a scored `ReadyLanding` to a running
+  // `ColonyState`, and building it gave real production consumers to:
+  //   turn.createColony, world.generateWorld, world.buildabilityScorerFor,
+  //   world.depositCoords, landing.evaluateLanding, landing.resolveHullFootprint,
+  //   catalog.createCatalog, catalog.getStructureType, construction.queueConstruction,
+  //   construction.enqueueProject, power.energyPerTurnWh
+  // Do not re-add any of them without deleting the caller that wired them.
+  //
+  // `resolveTurn` is still the sim's front door and is still supposed to be called by an
+  // application layer that does not exist yet — aic-hfb deliberately did NOT resolve a turn
+  // inside the bridge, because starting a colony and advancing it are different operations.
   'turn.resolveTurn',
-  // orders.applyOrders is spec 005 T003's player-order layer: the composition root
-  // (T007, src/sim/resolve.ts) is meant to call it as step 1, ahead of resolveTurn —
-  // same category as turn.createColony/turn.resolveTurn just above, awaiting the same
-  // not-yet-built application layer. tests/integration/orders-turn-seam.test.ts proves
-  // it composes correctly with turn.ts today; it is not itself that production caller.
-  'orders.applyOrders',
-  'world.generateWorld',
-  'world.buildabilityScorerFor',
-  'world.depositCoords',
-  'landing.evaluateLanding',
+  // Called only from inside `landing.ts` itself (by `evaluateLanding`), and this audit
+  // counts cross-file callers only — so these are orphans by its definition, not by design.
   'landing.scoreLandingSite',
   'landing.validateLandingSite',
-  'landing.resolveHullFootprint',
-  'catalog.createCatalog',
-  'catalog.getStructureType',
   'catalog.listStructureTypes',
 
+  // --- The colony-start bridge's own public surface (aic-8tl.5) ---
+  // The outermost entry points for the opening move. `startMission` composes the other two,
+  // but same-file callers do not count here. These are what the sim/UI adapter consumes.
+  'colony-start.buildColony',
+  'colony-start.evaluateLandingOn',
+  'colony-start.startMission',
+
   // --- Intended consumer is a chain bead not yet built ---
-  // generation.registerOutputModel (aic-a00.18): the extension point itself. This file
-  // only counts CROSS-FILE callers, and generation.ts's own three built-in curves
-  // (constant, solarDecay, radioisotopeDecay) register themselves inside generation.ts
-  // at module load — a REAL production call, just one this scanner skips by design.
-  // A cross-file call appears once a real solar/RTG structure ships in catalog data
-  // naming a curve registered elsewhere (spec 003 chain 2, not yet built).
-  // tests/integration/generation-seam.test.ts proves the registry works end to end
-  // through resolveTurn today by registering and using an invented kind.
-  'generation.registerOutputModel',
   'scale.tileAreaForEdgeM2', // aic-ck0 / chain 1 berm cost
   'scale.footprintAreaM2', // aic-ck0 / chain 1 berm cost
   'scale.arealMassKg', // aic-ck0 / chain 1 berm cost
   'scale.arealDensityKgPerM2', // aic-ck0 / chain 1 berm cost
   'buildability.eligibleDepositKinds', // chains 2 and 3 deposit-gated siting
-  // construction.queueConstruction/.enqueueProject/.cancelProject/.releaseTiles were
-  // here as "application layer places structures" — orders.ts (spec 005 T003) IS that
-  // application layer for these four now, so they were REMOVED rather than left stale.
   'construction.createProject',
   'construction.occupiedTiles',
   'construction.requiredLabourHoursPerBuildTurn',
   'construction.totalLabourHoursRequired',
   'construction.turnsCompletedFor',
   'ledger.computeBalances',
-  'power.energyPerTurnWh',
   'brownout.comparePowerDemands',
   'placement.resolveFootprint',
   'time.elapsedSeconds',
+
+  // --- Arrived with stetmann's power-source and orders work; consumer pending ---
+  // aic-5lq removed the hardcoded reactor constant in favour of a registry. The
+  // registry's writer is authored catalog data, so nothing calls it yet.
+  'generation.registerOutputModel',
+  // aic-gom.3's typed intent layer. Its caller is the sim/UI adapter (aic-8tl.5),
+  // which is the next bead in the playable-start chain.
+  'orders.applyOrders',
 ]
 
 interface Audit {
