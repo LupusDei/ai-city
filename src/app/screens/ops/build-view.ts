@@ -58,8 +58,8 @@
 import type { StructureCatalog, StructureType } from '../../../sim/catalog'
 import { listStructureTypes } from '../../../sim/catalog'
 import { DRONE_HULL_ID, REACTOR_HULL_ID } from '../../../sim/colony-start'
-import { turnsCompletedFor } from '../../../sim/construction'
-import type { Coord } from '../../../sim/grid'
+import { isProjectComplete, turnsCompletedFor } from '../../../sim/construction'
+import type { Coord, Grid } from '../../../sim/grid'
 import type {
   CancelBuildFailure,
   CancelBuildOrder,
@@ -67,8 +67,11 @@ import type {
   QueueBuildFailure,
   QueueBuildOrder,
 } from '../../../sim/orders'
+import { resolveFootprint, validatePlacement } from '../../../sim/placement'
 import { electricityWh } from '../../../sim/power'
 import type { RunningState } from '../../state/game-state'
+import type { StructureRenderEntry } from '../../canvas/render-world'
+import { groupDigits } from './ops-view'
 
 // ---------------------------------------------------------------------------
 // The build tray
@@ -88,6 +91,17 @@ export interface BuildMenuEntry {
   /** Tiles the footprint occupies — "how big is this on the ground". */
   readonly footprintTiles: number
   readonly buildTurns: number
+  /**
+   * Rated electricity GENERATED per turn while operating, in watt-hours. `0` for a
+   * structure that generates nothing (the common case — most structures are consumers).
+   *
+   * aic-oby.8: before this field existed, the build tray read `powerDrawWh` from
+   * `consumes` alone, so the Fission Surface Power Unit — a pure generator with an EMPTY
+   * `consumes` map — showed "0 Wh / cycle" on the one card where the player most needs to
+   * see a number: the structure whose entire purpose is generation. `powerReadout` below
+   * reads whichever of this and {@link powerDrawWh} is non-zero and signs it accordingly.
+   */
+  readonly generationWh: number
   /** Rated operating draw, in watt-hours per turn. `0` for a structure that draws nothing. */
   readonly powerDrawWh: number
   /** Empty for a structure that costs nothing in materials to build (the common MVP case). */
@@ -105,12 +119,32 @@ export function buildMenu(catalog: StructureCatalog): readonly BuildMenuEntry[] 
     name: structureType.name,
     footprintTiles: structureType.footprint.length,
     buildTurns: structureType.buildTurns,
+    generationWh: electricityWh(structureType.produces),
     powerDrawWh: electricityWh(structureType.consumes),
     buildCost: Object.entries(structureType.buildCost).map(([resource, amount]) => ({
       resource,
       amount,
     })),
   }))
+}
+
+/**
+ * The build card's one-line power figure, clearly SIGNED — aic-oby.8's fix for "a
+ * reactor's output is invisible".
+ *
+ * Reads whichever of `generationWh`/`powerDrawWh` is non-zero rather than assuming the
+ * MVP catalog's own invariant that no structure both produces and consumes electricity:
+ * a future structure that legitimately does both still gets an honest two-part answer
+ * instead of one side being silently dropped.
+ */
+export function powerReadout(entry: BuildMenuEntry): string {
+  const { generationWh, powerDrawWh } = entry
+  if (generationWh > 0 && powerDrawWh > 0) {
+    return `+${groupDigits(generationWh)} Wh generated, -${groupDigits(powerDrawWh)} Wh drawn / cycle`
+  }
+  if (generationWh > 0) return `+${groupDigits(generationWh)} Wh / cycle generated`
+  if (powerDrawWh > 0) return `-${groupDigits(powerDrawWh)} Wh / cycle drawn`
+  return 'No power draw or generation'
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +203,102 @@ export interface AnchorBox {
  */
 export function anchorBox(anchor: Coord, tileSize: number): AnchorBox {
   return { left: anchor.x * tileSize, top: anchor.y * tileSize, size: tileSize }
+}
+
+/**
+ * One tile's box as a PERCENTAGE of the rendered map (aic-oby.8), so an overlay built
+ * from it scales with a responsive container regardless of the container's actual
+ * rendered pixel size.
+ *
+ * WHY THIS EXISTS ALONGSIDE `anchorBox`, NOT INSTEAD OF IT. `anchorBox`'s pixel output
+ * only lines up with the canvas when the canvas is displayed at its native backing-store
+ * size — true everywhere before this bead, because nothing was responsive. Once
+ * `TerrainCanvas`'s `fitParent` lets the map SHRINK on a narrow viewport (see that
+ * component's header), a pixel-positioned overlay sized for the intrinsic 512x512 map
+ * would sit in the wrong place over a map now rendered at, say, 342x342. A percentage is
+ * immune to that: `left: 50%` means "half of however wide the box actually is," which
+ * tracks the canvas at any size with no resize listener and no measurement of anything.
+ */
+export interface AnchorBoxPercent {
+  readonly leftPercent: number
+  readonly topPercent: number
+  readonly widthPercent: number
+  readonly heightPercent: number
+}
+
+/**
+ * Where tile `anchor`'s box sits, as a percentage of a `gridWidth` x `gridHeight` map —
+ * purely from the grid dimensions and the anchor, never from a measured element (the
+ * same discipline `anchorBox` and `candidate-sites.ts`'s `candidateMarkerBox` already
+ * follow, for the identical reason).
+ */
+export function anchorBoxPercent(
+  anchor: Coord,
+  gridWidth: number,
+  gridHeight: number,
+): AnchorBoxPercent {
+  return {
+    leftPercent: (anchor.x / gridWidth) * 100,
+    topPercent: (anchor.y / gridHeight) * 100,
+    widthPercent: (1 / gridWidth) * 100,
+    heightPercent: (1 / gridHeight) * 100,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The colony itself, projected for the canvas (aic-oby.8: "the colony is invisible")
+// ---------------------------------------------------------------------------
+
+/**
+ * Every structure standing on the colony's grid, as the plain-data PROJECTION
+ * `render-world.ts`'s `renderStructures` layer draws — hulls and player-built
+ * structures alike, complete or not.
+ *
+ * `complete` is the SIM'S OWN VERDICT (`construction.ts`'s `isProjectComplete`), never
+ * recomputed here or in the renderer: constitution §4 forbids either from deciding
+ * something the sim could disagree with, and completeness is exactly such a decision —
+ * see `isProjectComplete`'s own doc on why a `buildTurns: 0` project (a landed hull, or
+ * a Shield Berm) is complete on arrival.
+ */
+export function colonyStructures(state: RunningState): readonly StructureRenderEntry[] {
+  const config = state.colony.mission.turnCycle
+  return state.colony.queue.map((project) => ({
+    kind: project.structureType.id,
+    tiles: project.tiles,
+    complete: isProjectComplete(config, project),
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Placement preview (aic-oby.8: "no placement preview")
+// ---------------------------------------------------------------------------
+
+/**
+ * The footprint a placement WOULD occupy, and whether the sim would accept it — asked of
+ * the sim, never reimplemented.
+ *
+ * `tiles` is always the FULL resolved footprint (`placement.ts`'s `resolveFootprint`),
+ * even when illegal: a rejection only ever names the ONE offending tile
+ * (`PlacementRejection.tile`), but a preview needs to highlight the whole shape the
+ * player is about to commit, in or out of bounds. `legal` is `validatePlacement`'s own
+ * verdict — the same bounds-and-occupancy check `queueConstruction` runs for real — so
+ * a preview can never show green where a click would be refused, or vice versa.
+ */
+export interface PlacementPreview {
+  readonly tiles: readonly Coord[]
+  readonly legal: boolean
+}
+
+/** The preview for placing `structureType` anchored at `anchor` on `grid`. */
+export function placementPreview(
+  grid: Grid,
+  structureType: StructureType,
+  anchor: Coord,
+): PlacementPreview {
+  return {
+    tiles: resolveFootprint(structureType, anchor),
+    legal: validatePlacement(grid, structureType, anchor).ok,
+  }
 }
 
 // ---------------------------------------------------------------------------

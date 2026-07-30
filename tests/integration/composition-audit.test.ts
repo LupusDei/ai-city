@@ -101,7 +101,6 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   'construction.totalLabourHoursRequired',
   'ledger.computeBalances',
   'brownout.comparePowerDemands',
-  'placement.resolveFootprint',
   'time.elapsedSeconds',
 
   // --- Arrived with stetmann's power-source and orders work; consumer pending ---

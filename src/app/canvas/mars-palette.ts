@@ -324,3 +324,70 @@ export function depositMarker(kind: string): DepositMarker {
     rim: RESERVE_DEPOSIT_RIM,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Colony structures (aic-oby.8) — "you cannot see your own colony"
+// ---------------------------------------------------------------------------
+
+/** The fill colour a `StructureType.id` is drawn in. */
+export interface StructureMarker {
+  readonly kind: string
+  readonly fill: Rgb
+}
+
+/**
+ * Fills for every structure kind the MVP catalog ships, mirroring `DEPOSIT_MARKERS`'
+ * pattern exactly and for the same reason: registering a new structure's colour is one
+ * entry here, never a change to `render-world.ts` or to the code that calls it.
+ *
+ * Hue groups by FUNCTION, not by chain, so the player learns a vocabulary rather than
+ * seven unrelated colours: power (amber — both the landed reactor hull and a
+ * player-built Reactor Unit are the identical hardware, see `colony-start.ts`), life
+ * support (green, the habitat), and chain 1's regolith/sinter/shielding line (a warm
+ * mineral progression: raw regolith tan, processed plate grey, finished shielding a
+ * darker stone). The drone hull is blue, distinct from every industrial colour, because
+ * it never occupies the same visual role as anything it stands beside.
+ */
+export const STRUCTURE_MARKERS: readonly StructureMarker[] = [
+  { kind: 'drone-hull', fill: { r: 120, g: 168, b: 214 } },
+  { kind: 'reactor-hull', fill: { r: 232, g: 176, b: 74 } },
+  { kind: 'reactor-unit', fill: { r: 232, g: 176, b: 74 } },
+  { kind: 'habitat-module', fill: { r: 122, g: 196, b: 138 } },
+  { kind: 'regolith-hopper', fill: { r: 190, g: 150, b: 96 } },
+  { kind: 'sinter-press', fill: { r: 168, g: 166, b: 174 } },
+  { kind: 'shield-berm', fill: { r: 108, g: 100, b: 92 } },
+]
+
+/**
+ * Fills for a structure kind this palette has no entry for, chosen by the same
+ * `hashKind` scheme `depositMarker` uses for the identical reason: a colony that has
+ * queued a structure a future chain adds must still be VISIBLE — the whole point of
+ * this bead — rather than invisible until an author remembers to register it.
+ */
+export const RESERVE_STRUCTURE_FILLS: readonly Rgb[] = [
+  { r: 214, g: 196, b: 132 },
+  { r: 190, g: 156, b: 208 },
+  { r: 158, g: 210, b: 168 },
+  { r: 232, g: 168, b: 128 },
+]
+
+/** The fill colour for `kind`, always — registered, or a stable hash-selected reserve. */
+export function structureFill(kind: string): Rgb {
+  for (const marker of STRUCTURE_MARKERS) {
+    if (marker.kind === kind) return marker.fill
+  }
+
+  const index = hashKind(kind) % RESERVE_STRUCTURE_FILLS.length
+  return RESERVE_STRUCTURE_FILLS[index] ?? MARS_VOID
+}
+
+/** The outline every structure tile is stroked in, complete or not. Dark and neutral, so
+ * it reads against every fill colour above without implying a kind of its own. */
+export const STRUCTURE_OUTLINE: Rgb = { r: 18, g: 14, b: 12 }
+
+/**
+ * The fill's opacity while a structure is still under construction: a wash, not a
+ * solid — so "not yet built" reads at a glance even before the hatch lines register,
+ * and a completed structure (full opacity) is unmistakably different right next to it.
+ */
+export const STRUCTURE_INCOMPLETE_FILL_ALPHA = 0.35

@@ -74,13 +74,16 @@ import type { RunningState } from '../../state/game-state'
 import type { Coord } from '../../../sim/grid'
 import type { PlayerOrder } from '../../../sim/orders'
 import {
-  anchorBox,
+  anchorBoxPercent,
   buildAnchorTestId,
   buildMenu,
   buildQueue,
   cancelBuildOrder,
+  colonyStructures,
   lastOrderOutcome,
   orderOutcomeReadout,
+  placementPreview,
+  powerReadout,
   queueBuildOrder,
 } from './build-view'
 import type { BuildMenuEntry } from './build-view'
@@ -261,7 +264,12 @@ const S = {
   },
   buildCardName: { fontWeight: 700, fontSize: '0.9rem' },
   buildCardMeta: { fontSize: '0.7rem', color: MUTED },
-  placementPlate: { position: 'relative', display: 'inline-block' },
+  // No fixed width/height here on purpose (aic-oby.8): the plate's box is RESPONSIVE,
+  // set inline per-render from `worldPixelSize` as `width: 100%; max-width: <intrinsic>px;
+  // aspect-ratio: <intrinsic>`, so it fills a phone's viewport instead of overflowing it —
+  // see `TerrainCanvas.tsx`'s `fitParent` header for why the canvas itself stays
+  // pixel-exact underneath this responsive box.
+  placementPlate: { position: 'relative', boxSizing: 'border-box' },
   placementOverlay: { position: 'absolute', inset: 0 },
   anchorButton: {
     position: 'absolute',
@@ -270,6 +278,24 @@ const S = {
     border: 'none',
     background: 'transparent',
     cursor: 'crosshair',
+  },
+  // The placement preview (aic-oby.8: "no placement preview"): the EXACT footprint a
+  // click would occupy, highlighted before the click, legal and illegal visibly
+  // different. `pointerEvents: 'none'` so the highlight never steals a click from the
+  // anchor button underneath it.
+  placementHighlightLegal: {
+    position: 'absolute',
+    boxSizing: 'border-box',
+    border: `2px solid ${OK}`,
+    background: 'rgba(111, 174, 122, 0.28)',
+    pointerEvents: 'none',
+  },
+  placementHighlightIllegal: {
+    position: 'absolute',
+    boxSizing: 'border-box',
+    border: `2px solid ${RUST}`,
+    background: 'rgba(194, 96, 58, 0.28)',
+    pointerEvents: 'none',
   },
   outcomeBanner: {
     padding: '0.5rem 0.7rem',
@@ -377,16 +403,41 @@ function Gauge({
  * `SurveyScreen` already teaches the player "click a tile over the terrain canvas to
  * act on it" for the two landed hulls. Placement reuses exactly that gesture rather
  * than inventing a second one: `TerrainCanvas` renders `state.world` (the same canvas
- * the survey screen draws), and an overlay of absolutely-positioned buttons — sized and
- * positioned from tile coordinates and the tile size alone, per `build-view.ts`'s
- * `anchorBox`, never from a measured element — sits over it. The one difference from
- * the survey screen's lattice of candidate markers is deliberate: a hull anchor was
- * pre-filtered to legal-by-bounds sites because `evaluateLanding` cannot validate a
- * single anchor in isolation (see `candidate-sites.ts`), but `queueConstruction`
- * validates every order independently, so there is no equivalent reason to withhold
- * any tile here — an anchor that would hang a footprint off the map is simply offered,
- * clicked, and refused by the sim with `out-of-bounds`, exactly the typed rejection
- * FR-006 wants demonstrated.
+ * the survey screen draws) AND, per aic-oby.8, the colony standing on it
+ * (`build-view.ts`'s `colonyStructures`) — an overlay of absolutely-positioned buttons,
+ * sized and positioned from tile coordinates and the grid dimensions alone, per
+ * `build-view.ts`'s `anchorBoxPercent`, never from a measured element — sits over it
+ * only while a structure is selected. The one difference from the survey screen's
+ * lattice of candidate markers is deliberate: a hull anchor was pre-filtered to
+ * legal-by-bounds sites because `evaluateLanding` cannot validate a single anchor in
+ * isolation (see `candidate-sites.ts`), but `queueConstruction` validates every order
+ * independently, so there is no equivalent reason to withhold any tile here — an anchor
+ * that would hang a footprint off the map is simply offered, clicked, and refused by the
+ * sim with `out-of-bounds`, exactly the typed rejection FR-006 wants demonstrated.
+ *
+ * ============================================================================
+ * THE COLONY IS ALWAYS ON SCREEN, NOT ONLY WHILE PLACING (aic-oby.8)
+ * ----------------------------------------------------------------------------
+ * Before this fix, the terrain canvas — and therefore every structure the player had
+ * queued — was rendered ONLY inside the `selected !== null` branch below. A player who
+ * was not actively placing something (which is most of a 278-turn mission) saw no map at
+ * all: not merely an empty one, none. The map now renders unconditionally; only the
+ * click-to-place OVERLAY (the anchor buttons and the placement preview) is conditional on
+ * a selection, because those are the controls FOR placing, not the view of what exists.
+ *
+ * ============================================================================
+ * RESPONSIVE WITHOUT BREAKING AC-1.3 (aic-oby.8: "grid is slightly off screen")
+ * ----------------------------------------------------------------------------
+ * The plate's box is `width: 100%` capped at `max-width: <the map's intrinsic pixel
+ * size>px`, with `aspect-ratio` locking its proportions — so on a screen at least that
+ * wide (every desktop, and the acceptance suite's own default viewport) it resolves to
+ * EXACTLY the intrinsic size, identical to what this screen rendered before this bead,
+ * and only SHRINKS, proportionally, on a viewport narrower than the map — a phone.
+ * `TerrainCanvas`'s `fitParent` makes the canvas itself track that box; see its header
+ * for why the canvas's backing store (what AC-1.3 compares) is untouched by any of this.
+ * The overlay uses PERCENTAGE geometry (`anchorBoxPercent`) for the identical reason: a
+ * button positioned in raw pixels sized for the intrinsic map would sit in the wrong
+ * place once the map is displayed smaller than that.
  */
 function BuildPanel({
   state,
@@ -396,6 +447,9 @@ function BuildPanel({
   readonly onIssueOrders: (orders: readonly PlayerOrder[]) => void
 }): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // The player's own pointer position over the placement lattice — bookkeeping about
+  // input, exactly like `selectedId`, and not game state: it never reaches the sim.
+  const [hoveredAnchor, setHoveredAnchor] = useState<Coord | null>(null)
 
   const menu = buildMenu(state.catalog)
   const queue = buildQueue(state)
@@ -406,9 +460,19 @@ function BuildPanel({
 
   const { width: gridWidth, height: gridHeight } = state.world.grid
   const { width: plateWidth, height: plateHeight } = worldPixelSize(state.world, DEFAULT_TILE_SIZE)
+  const structures = colonyStructures(state)
+
+  // The EXACT footprint a click at `hoveredAnchor` would occupy, and whether the sim
+  // would accept it — asked of the sim (`build-view.ts`'s `placementPreview`, which
+  // calls `placement.ts`'s own `validatePlacement`), never reimplemented here.
+  const preview =
+    selected === null || hoveredAnchor === null
+      ? null
+      : placementPreview(state.colony.grid, selected.structureType, hoveredAnchor)
 
   const toggleSelected = (id: string): void => {
     setSelectedId((current) => (current === id ? null : id))
+    setHoveredAnchor(null)
   }
 
   const placeAt = (anchor: Coord): void => {
@@ -441,7 +505,7 @@ function BuildPanel({
               {groupDigits(entry.footprintTiles)} tile{entry.footprintTiles === 1 ? '' : 's'} ·{' '}
               {groupDigits(entry.buildTurns)} build turn{entry.buildTurns === 1 ? '' : 's'}
             </span>
-            <span style={S.buildCardMeta}>{formatWattHours(entry.powerDrawWh)} / cycle</span>
+            <span style={S.buildCardMeta}>{powerReadout(entry)}</span>
             <span style={S.buildCardMeta}>
               {entry.buildCost.length === 0
                 ? 'No material cost'
@@ -468,46 +532,87 @@ function BuildPanel({
       )}
 
       {selected === null ? null : (
-        <div>
-          <p style={S.tileHint}>
-            Placing {selected.name} — click a tile on the colony grid to build it there. Click{' '}
-            {selected.name} again above to cancel placement.
-          </p>
-          <div
-            style={{
-              ...S.placementPlate,
-              width: `${String(plateWidth)}px`,
-              height: `${String(plateHeight)}px`,
-            }}
-          >
-            <TerrainCanvas world={state.world} tileSize={DEFAULT_TILE_SIZE} />
-            <div style={S.placementOverlay} data-testid="placement-overlay">
-              {Array.from({ length: gridWidth * gridHeight }, (_unused, index) => {
-                const anchor: Coord = { x: index % gridWidth, y: Math.floor(index / gridWidth) }
-                const box = anchorBox(anchor, DEFAULT_TILE_SIZE)
-                return (
-                  <button
-                    key={buildAnchorTestId(anchor)}
-                    type="button"
-                    data-testid={buildAnchorTestId(anchor)}
-                    aria-label={`Place ${selected.name} at (${String(anchor.x)}, ${String(anchor.y)})`}
-                    style={{
-                      ...S.anchorButton,
-                      left: `${String(box.left)}px`,
-                      top: `${String(box.top)}px`,
-                      width: `${String(box.size)}px`,
-                      height: `${String(box.size)}px`,
-                    }}
-                    onClick={() => {
-                      placeAt(anchor)
-                    }}
-                  />
-                )
-              })}
-            </div>
-          </div>
-        </div>
+        <p style={S.tileHint}>
+          Placing {selected.name} — click a tile on the colony grid to build it there. Click{' '}
+          {selected.name} again above to cancel placement.
+        </p>
       )}
+
+      {/* Rendered UNCONDITIONALLY (aic-oby.8): this is the colony itself, not a
+          placement control, so it stays visible whether or not anything is selected. */}
+      <div
+        style={{
+          ...S.placementPlate,
+          width: '100%',
+          maxWidth: `${String(plateWidth)}px`,
+          aspectRatio: `${String(plateWidth)} / ${String(plateHeight)}`,
+        }}
+      >
+        <TerrainCanvas
+          world={state.world}
+          tileSize={DEFAULT_TILE_SIZE}
+          structures={structures}
+          fitParent
+        />
+        {selected === null ? null : (
+          <div style={S.placementOverlay} data-testid="placement-overlay">
+            {preview === null
+              ? null
+              : preview.tiles.map((tile) => {
+                  const box = anchorBoxPercent(tile, gridWidth, gridHeight)
+                  return (
+                    <div
+                      key={`preview-${String(tile.x)}-${String(tile.y)}`}
+                      data-testid={`placement-preview-${String(tile.x)}-${String(tile.y)}`}
+                      data-legal={String(preview.legal)}
+                      aria-hidden="true"
+                      style={{
+                        ...(preview.legal ? S.placementHighlightLegal : S.placementHighlightIllegal),
+                        left: `${String(box.leftPercent)}%`,
+                        top: `${String(box.topPercent)}%`,
+                        width: `${String(box.widthPercent)}%`,
+                        height: `${String(box.heightPercent)}%`,
+                      }}
+                    />
+                  )
+                })}
+            {Array.from({ length: gridWidth * gridHeight }, (_unused, index) => {
+              const anchor: Coord = { x: index % gridWidth, y: Math.floor(index / gridWidth) }
+              const box = anchorBoxPercent(anchor, gridWidth, gridHeight)
+              return (
+                <button
+                  key={buildAnchorTestId(anchor)}
+                  type="button"
+                  data-testid={buildAnchorTestId(anchor)}
+                  aria-label={`Place ${selected.name} at (${String(anchor.x)}, ${String(anchor.y)})`}
+                  style={{
+                    ...S.anchorButton,
+                    left: `${String(box.leftPercent)}%`,
+                    top: `${String(box.topPercent)}%`,
+                    width: `${String(box.widthPercent)}%`,
+                    height: `${String(box.heightPercent)}%`,
+                  }}
+                  onMouseEnter={() => {
+                    setHoveredAnchor(anchor)
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredAnchor(null)
+                  }}
+                  onFocus={() => {
+                    setHoveredAnchor(anchor)
+                  }}
+                  onBlur={() => {
+                    setHoveredAnchor(null)
+                  }}
+                  onClick={() => {
+                    placeAt(anchor)
+                  }}
+                />
+              )
+            })}
+          </div>
+        )}
+      </div>
 
       <div>
         <h3 style={S.panelTitle}>Build queue</h3>

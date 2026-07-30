@@ -11,20 +11,26 @@ import { describe, expect, it } from 'vitest'
 
 import {
   anchorBox,
+  anchorBoxPercent,
   buildAnchorTestId,
   buildMenu,
   buildOrderId,
   buildQueue,
   cancelBuildOrder,
+  colonyStructures,
   lastOrderOutcome,
   orderOutcomeReadout,
+  placementPreview,
+  powerReadout,
   queueBuildOrder,
 } from '../../src/app/screens/ops/build-view'
+import type { BuildMenuEntry } from '../../src/app/screens/ops/build-view'
 import { dispatch } from '../../src/app/state/game-state'
 import type { RunningState } from '../../src/app/state/game-state'
 import { getStructureType, listStructureTypes } from '../../src/sim/catalog'
 import { HABITAT_MODULE_ID, REACTOR_UNIT_ID } from '../../src/sim/catalog-data-core'
 import { REGOLITH_HOPPER_ID } from '../../src/sim/catalog-data'
+import { DRONE_HULL_ID, REACTOR_HULL_ID } from '../../src/sim/colony-start'
 import type { PlayerOrder } from '../../src/sim/orders'
 import { startedColony } from '../support/running-colony'
 
@@ -94,6 +100,70 @@ describe('buildMenu', () => {
     expect(berm?.buildCost.length).toBeGreaterThan(0)
     expect(berm?.buildCost.every((line) => line.amount > 0)).toBe(true)
   })
+
+  it('should report the reactor’s real GENERATION — aic-oby.8, "a reactor’s output is invisible"', () => {
+    const state = startedColony()
+    const reactor = buildMenu(state.catalog).find((entry) => entry.id === REACTOR_UNIT_ID)
+    expect(reactor?.generationWh).toBeGreaterThan(0)
+    expect(reactor?.generationWh).toBe(
+      getStructureType(state.catalog, REACTOR_UNIT_ID)?.produces.electricity,
+    )
+    // The reactor consumes nothing: the draw side of the same card must not lie either.
+    expect(reactor?.powerDrawWh).toBe(0)
+  })
+
+  it('should report zero generation for a pure consumer, like the habitat', () => {
+    const state = startedColony()
+    const habitat = buildMenu(state.catalog).find((entry) => entry.id === HABITAT_MODULE_ID)
+    expect(habitat?.generationWh).toBe(0)
+  })
+})
+
+describe('powerReadout', () => {
+  // A REAL `BuildMenuEntry` (the reactor's), with only the two power figures overridden —
+  // never a hand-shaped fixture with a fake `structureType`, matching this suite's own
+  // "built against real data" discipline (see the module doc).
+  const found = buildMenu(startedColony().catalog).find((candidate) => candidate.id === REACTOR_UNIT_ID)
+  if (found === undefined) throw new Error('fixture catalog is missing the Reactor Unit')
+  const base: BuildMenuEntry = found
+
+  function entry(generationWh: number, powerDrawWh: number): BuildMenuEntry {
+    return { ...base, generationWh, powerDrawWh }
+  }
+
+  it('should read a generator’s figure as a POSITIVE, signed generation line', () => {
+    const text = powerReadout(entry(1_986_389, 0))
+    expect(text).toContain('+')
+    expect(text).toContain('1,986,389')
+    expect(text.toLowerCase()).toContain('generated')
+  })
+
+  it('should read a consumer’s figure as a NEGATIVE, signed draw line', () => {
+    const text = powerReadout(entry(0, 9_081_732))
+    expect(text).toContain('-')
+    expect(text).toContain('9,081,732')
+    expect(text.toLowerCase()).toContain('drawn')
+  })
+
+  it('should report neither a draw nor a generation for a structure with no power figure at all', () => {
+    expect(powerReadout(entry(0, 0)).toLowerCase()).toContain('no power')
+  })
+
+  it('should report BOTH figures, signed, for a structure that does both', () => {
+    const text = powerReadout(entry(10, 20))
+    expect(text).toContain('+10')
+    expect(text).toContain('-20')
+  })
+
+  it('should show the reactor’s real build-menu entry with a non-zero, positive readout', () => {
+    // The end-to-end path: a REAL catalog entry, not a hand-built fixture.
+    const state = startedColony()
+    const reactor = buildMenu(state.catalog).find((candidate) => candidate.id === REACTOR_UNIT_ID)
+    expect(reactor).toBeDefined()
+    const text = powerReadout(reactor!)
+    expect(text).toContain('+')
+    expect(text.toLowerCase()).toContain('generated')
+  })
 })
 
 describe('buildOrderId', () => {
@@ -153,6 +223,110 @@ describe('anchorBox', () => {
     const a = anchorBox({ x: 2, y: 0 }, 8)
     const b = anchorBox({ x: 3, y: 0 }, 8)
     expect(a.left + a.size).toBe(b.left)
+  })
+})
+
+describe('anchorBoxPercent', () => {
+  it('should size and position a tile purely from its coordinate and the grid dimensions', () => {
+    expect(anchorBoxPercent({ x: 2, y: 5 }, 8, 8)).toEqual({
+      leftPercent: 25,
+      topPercent: 62.5,
+      widthPercent: 12.5,
+      heightPercent: 12.5,
+    })
+  })
+
+  it('should place adjacent tiles edge to edge with no gap and no overlap, in percent', () => {
+    const a = anchorBoxPercent({ x: 2, y: 0 }, 64, 64)
+    const b = anchorBoxPercent({ x: 3, y: 0 }, 64, 64)
+    expect(a.leftPercent + a.widthPercent).toBeCloseTo(b.leftPercent, 10)
+  })
+
+  it('should tile the whole map exactly: the last column ends at 100 percent', () => {
+    const last = anchorBoxPercent({ x: 63, y: 0 }, 64, 64)
+    expect(last.leftPercent + last.widthPercent).toBeCloseTo(100, 10)
+  })
+
+  it('should differ from a narrower or shorter grid — it reads the dimensions, not a constant', () => {
+    expect(anchorBoxPercent({ x: 1, y: 0 }, 64, 64)).not.toEqual(anchorBoxPercent({ x: 1, y: 0 }, 32, 32))
+  })
+})
+
+describe('colonyStructures', () => {
+  it('should include the two landed hulls, both already complete', () => {
+    const structures = colonyStructures(startedColony())
+    const drone = structures.find((s) => s.kind === DRONE_HULL_ID)
+    const reactor = structures.find((s) => s.kind === REACTOR_HULL_ID)
+    expect(drone?.complete).toBe(true)
+    expect(reactor?.complete).toBe(true)
+    // 2x2 each — the real hull footprint, not a placeholder.
+    expect(drone?.tiles.length).toBe(4)
+    expect(reactor?.tiles.length).toBe(4)
+  })
+
+  it('should include a freshly queued structure as INCOMPLETE', () => {
+    let state = startedColony()
+    const type = hopperType(state)
+    state = issue(state, [queueBuildOrder(type, FREE_ANCHOR)])
+
+    const structures = colonyStructures(state)
+    const hopper = structures.find((s) => s.kind === type.id)
+    expect(hopper?.complete).toBe(false)
+    expect(hopper?.tiles).toEqual(expect.arrayContaining([FREE_ANCHOR]))
+  })
+
+  it('should flip to COMPLETE once the sim says the project is done — never recomputed here', () => {
+    let state = startedColony()
+    const type = hopperType(state)
+    state = issue(state, [queueBuildOrder(type, FREE_ANCHOR)])
+
+    for (let i = 0; i < 6 && !colonyStructures(state).find((s) => s.kind === type.id)?.complete; i++) {
+      const resolved = dispatch(state, { kind: 'end-cycle', afterTurnsTaken: state.colony.turnsTaken })
+      if (resolved.phase !== 'running') throw new Error('end-cycle left the running phase')
+      state = resolved
+    }
+
+    expect(colonyStructures(state).find((s) => s.kind === type.id)?.complete).toBe(true)
+  })
+
+  it('should track the colony’s own queue length, hulls included', () => {
+    const state = startedColony()
+    expect(colonyStructures(state).length).toBe(state.colony.queue.length)
+  })
+})
+
+describe('placementPreview', () => {
+  it('should resolve the full footprint and mark it legal for a free, in-bounds anchor', () => {
+    const state = startedColony()
+    const type = hopperType(state)
+    const preview = placementPreview(state.colony.grid, type, FREE_ANCHOR)
+    expect(preview.legal).toBe(true)
+    expect(preview.tiles.length).toBe(type.footprint.length)
+    expect(preview.tiles).toEqual(expect.arrayContaining([FREE_ANCHOR]))
+  })
+
+  it('should mark an occupied anchor illegal, per the sim’s own validatePlacement', () => {
+    const state = startedColony()
+    const type = hopperType(state)
+    const preview = placementPreview(state.colony.grid, type, OCCUPIED_ANCHOR)
+    expect(preview.legal).toBe(false)
+  })
+
+  it('should still resolve the FULL footprint for an out-of-bounds anchor, not just the offending tile', () => {
+    // A `PlacementRejection` only ever names ONE tile; a preview must highlight the
+    // WHOLE shape the player is about to commit, in or out of bounds.
+    const state = startedColony()
+    const type = hopperType(state)
+    const preview = placementPreview(state.colony.grid, type, OUT_OF_BOUNDS_ANCHOR)
+    expect(preview.legal).toBe(false)
+    expect(preview.tiles.length).toBe(type.footprint.length)
+  })
+
+  it('should agree with validatePlacement’s own verdict for a legal placement — asked, not reimplemented', () => {
+    const state = startedColony()
+    const type = habitatType(state)
+    const preview = placementPreview(state.colony.grid, type, FREE_ANCHOR)
+    expect(preview.legal).toBe(true)
   })
 })
 

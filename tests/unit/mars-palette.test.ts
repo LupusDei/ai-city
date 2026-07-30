@@ -25,11 +25,13 @@ import {
   DEPOSIT_MARKERS,
   MARS_ELEVATION_STOPS,
   SLOPE_SHADE_GAIN,
+  STRUCTURE_MARKERS,
   depositMarker,
   elevationColour,
   rgbCss,
   rgbaCss,
   slopeShadeAlpha,
+  structureFill,
 } from '../../src/app/canvas/mars-palette'
 
 const lowest = MARS_ELEVATION_STOPS[0]!
@@ -214,5 +216,41 @@ describe('depositMarker', () => {
 
   it('should not throw on an empty kind string', () => {
     expect(depositMarker('').shape).toBe('square')
+  })
+})
+
+describe('structureFill', () => {
+  it('should give the reactor unit a registered fill of its own', () => {
+    const fill = structureFill('reactor-unit')
+    expect(STRUCTURE_MARKERS.some((marker) => marker.kind === 'reactor-unit' && marker.fill === fill)).toBe(
+      true,
+    )
+  })
+
+  it('should distinguish the habitat from the reactor by colour — a reactor and a habitat must not read as the same structure', () => {
+    expect(structureFill('habitat-module')).not.toEqual(structureFill('reactor-unit'))
+  })
+
+  it('should give the landed reactor hull and the buildable reactor unit the same fill — the identical hardware, see colony-start.ts', () => {
+    expect(structureFill('reactor-hull')).toEqual(structureFill('reactor-unit'))
+  })
+
+  it('should return a usable, stable fill for a structure kind the palette has never heard of', () => {
+    // Structure kinds are DATA in the sim (`StructureTypeSpec`). A future chain's
+    // structure must still be VISIBLE — the whole point of aic-oby.8 — rather than
+    // invisible until an author remembers to register a colour for it.
+    const fill = structureFill('future-structure-kind')
+    expect(fill).toEqual(structureFill('future-structure-kind'))
+  })
+
+  it('should spread unknown structure kinds across more than one fallback fill', () => {
+    const fills = new Set(
+      ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot'].map((k) => rgbCss(structureFill(k))),
+    )
+    expect(fills.size).toBeGreaterThan(1)
+  })
+
+  it('should not throw on an empty kind string', () => {
+    expect(() => structureFill('')).not.toThrow()
   })
 })

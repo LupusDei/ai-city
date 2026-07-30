@@ -32,7 +32,13 @@ import {
   renderWorld,
   worldPixelSize,
 } from '../../src/app/canvas/render-world'
-import type { Painter2D } from '../../src/app/canvas/render-world'
+import type { Painter2D, StructureRenderEntry } from '../../src/app/canvas/render-world'
+import {
+  STRUCTURE_INCOMPLETE_FILL_ALPHA,
+  rgbCss,
+  rgbaCss,
+  structureFill,
+} from '../../src/app/canvas/mars-palette'
 
 const SEED = 20260730
 const MAP = 64
@@ -118,9 +124,13 @@ class RecordingPainter implements Painter2D {
   }
 }
 
-function trace(world: World, tileSize?: number): readonly string[] {
+function trace(
+  world: World,
+  tileSize?: number,
+  structures?: readonly StructureRenderEntry[],
+): readonly string[] {
   const painter = new RecordingPainter()
-  renderWorld(painter, world, tileSize === undefined ? {} : { tileSize })
+  renderWorld(painter, world, { tileSize, structures })
   return painter.trace
 }
 
@@ -518,6 +528,157 @@ describe('renderWorld deposits', () => {
       ],
     })
     expect(trace(world, 8).filter((c) => c === 'beginPath()')).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Structures (aic-oby.8: "the colony is invisible")
+// ---------------------------------------------------------------------------
+
+describe('renderWorld structures', () => {
+  it('should draw nothing extra when no structures are given — the survey screen’s path', () => {
+    // Backward compatibility is the whole point of `structures` being optional: every
+    // call site and test that predates this option must render byte-for-byte what it
+    // always rendered.
+    const world = flat2x2()
+    expect(trace(world, 8)).toEqual(trace(world, 8, []))
+  })
+
+  it('should draw a filled rectangle at a complete structure’s tile', () => {
+    const world = flat2x2()
+    const structures: StructureRenderEntry[] = [
+      { kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: true },
+    ]
+    const calls = trace(world, 8, structures)
+    expect(calls).toContain(`fillStyle=${rgbCss(structureFill('habitat-module'))}`)
+    expect(calls).toContain('fillRect(0,0,8,8)')
+  })
+
+  it('should draw every structure tile, not only the anchor', () => {
+    const world = stubWorld({ width: 2, height: 2, elevation: [0, 0, 0, 0], score: [1, 1, 1, 1] })
+    const structures: StructureRenderEntry[] = [
+      {
+        kind: 'habitat-module',
+        tiles: [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 0, y: 1 },
+          { x: 1, y: 1 },
+        ],
+        complete: true,
+      },
+    ]
+    const calls = trace(world, 8, structures)
+    for (const rect of [
+      'fillRect(0,0,8,8)',
+      'fillRect(8,0,8,8)',
+      'fillRect(0,8,8,8)',
+      'fillRect(8,8,8,8)',
+    ]) {
+      // Once for elevation, once for the structure.
+      expect(calls.filter((c) => c === rect)).toHaveLength(2)
+    }
+  })
+
+  it('should fill a COMPLETE structure fully opaque', () => {
+    const world = flat2x2()
+    const structures: StructureRenderEntry[] = [
+      { kind: 'reactor-unit', tiles: [{ x: 0, y: 0 }], complete: true },
+    ]
+    const calls = trace(world, 8, structures)
+    expect(calls).toContain(`fillStyle=${rgbCss(structureFill('reactor-unit'))}`)
+    expect(calls).not.toContain(
+      `fillStyle=${rgbaCss(structureFill('reactor-unit'), STRUCTURE_INCOMPLETE_FILL_ALPHA)}`,
+    )
+  })
+
+  it('should fill an IN-PROGRESS structure at reduced alpha, distinctly from a complete one', () => {
+    const world = flat2x2()
+    const structures: StructureRenderEntry[] = [
+      { kind: 'reactor-unit', tiles: [{ x: 0, y: 0 }], complete: false },
+    ]
+    const calls = trace(world, 8, structures)
+    expect(calls).toContain(
+      `fillStyle=${rgbaCss(structureFill('reactor-unit'), STRUCTURE_INCOMPLETE_FILL_ALPHA)}`,
+    )
+    expect(calls).not.toContain(`fillStyle=${rgbCss(structureFill('reactor-unit'))}`)
+  })
+
+  it('should draw a hatch stroke through an in-progress structure but not a complete one', () => {
+    // "Outline/hatch" — the visual distinction the bead's own acceptance criterion asks
+    // for. A complete structure is stroked for its outline only; an incomplete one is
+    // stroked for the outline AND a diagonal hatch, so it strokes strictly more.
+    const world = flat2x2()
+    const completeStrokes = trace(world, 8, [
+      { kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: true },
+    ]).filter((c) => c === 'stroke()').length
+    const incompleteStrokes = trace(world, 8, [
+      { kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: false },
+    ]).filter((c) => c === 'stroke()').length
+    expect(incompleteStrokes).toBeGreaterThan(completeStrokes)
+  })
+
+  it('should stroke every structure tile’s outline in the same dark, neutral colour regardless of kind', () => {
+    const world = flat2x2()
+    const calls = trace(world, 8, [
+      { kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: true },
+      { kind: 'reactor-unit', tiles: [{ x: 1, y: 0 }], complete: false },
+    ])
+    const outlineStyles = new Set(calls.filter((c) => c.startsWith('strokeStyle=')))
+    // Both structures share the one outline colour, so at most one distinct strokeStyle
+    // is ever assigned for the structure layer (the graticule, on this small a map, sets
+    // none — see "should omit the graticule for a map smaller than one interval").
+    expect(outlineStyles.size).toBe(1)
+  })
+
+  it('should give two different structure kinds visibly different fills', () => {
+    const world = stubWorld({ width: 2, height: 1, elevation: [0.5, 0.5], score: [1, 1] })
+    const calls = trace(world, 8, [
+      { kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: true },
+      { kind: 'reactor-unit', tiles: [{ x: 1, y: 0 }], complete: true },
+    ])
+    expect(calls).toContain(`fillStyle=${rgbCss(structureFill('habitat-module'))}`)
+    expect(calls).toContain(`fillStyle=${rgbCss(structureFill('reactor-unit'))}`)
+    expect(structureFill('habitat-module')).not.toEqual(structureFill('reactor-unit'))
+  })
+
+  it('should draw structures in array order, over the terrain and deposits beneath them', () => {
+    const world = stubWorld({
+      width: 1,
+      height: 1,
+      elevation: [0.5],
+      score: [1],
+      deposits: [{ x: 0, y: 0, kind: 'silica', richness: 0.5 }],
+    })
+    const calls = trace(world, 8, [{ kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: true }])
+    const lastDepositFill = calls.lastIndexOf('fill()')
+    const structureFillCall = calls.lastIndexOf(`fillStyle=${rgbCss(structureFill('habitat-module'))}`)
+    expect(structureFillCall).toBeGreaterThan(lastDepositFill)
+  })
+
+  it('should skip a structure tile whose coordinates fall outside the grid', () => {
+    // Defence in depth, mirroring `drawDeposits`'s identical guard: a hand-built or
+    // stale colony could name a tile outside the current grid.
+    const world = stubWorld({ width: 1, height: 1, elevation: [0.5], score: [1] })
+    const calls = trace(world, 8, [
+      { kind: 'habitat-module', tiles: [{ x: -1, y: 0 }, { x: 0, y: 9 }], complete: true },
+    ])
+    expect(calls).not.toContain(`fillStyle=${rgbCss(structureFill('habitat-module'))}`)
+  })
+
+  it('should draw an unregistered structure kind rather than skipping it', () => {
+    const world = flat2x2()
+    const calls = trace(world, 8, [
+      { kind: 'future-chain-structure', tiles: [{ x: 0, y: 0 }], complete: true },
+    ])
+    expect(calls).toContain(`fillStyle=${rgbCss(structureFill('future-chain-structure'))}`)
+  })
+
+  it('should draw nothing for a zero-size canvas even with structures given', () => {
+    const calls = trace(flat2x2(), 0, [
+      { kind: 'habitat-module', tiles: [{ x: 0, y: 0 }], complete: true },
+    ])
+    expect(calls).toEqual(['setTransform(1,0,0,1,0,0)'])
   })
 })
 

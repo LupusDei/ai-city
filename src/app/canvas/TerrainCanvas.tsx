@@ -26,17 +26,52 @@
  * differently between two loads of the same page. The canvas is therefore sized from the
  * world and the tile size alone. Resizing the window does not distort the map because
  * nothing about the map is a function of the window.
+ *
+ * ============================================================================
+ * `fitParent` (aic-oby.8) — RESPONSIVE DISPLAY WITHOUT A RESPONSIVE BACKING STORE
+ * ----------------------------------------------------------------------------
+ * The General played the live build on a phone: "Grid is slightly off screen and I can't
+ * tell where I am placing items." The map's BACKING STORE cannot become viewport-sized —
+ * that is exactly the "WHY THE SIZE IS NOT MEASURED FROM THE CONTAINER" constraint above,
+ * because a phone's viewport width is layout, and layout is precisely what AC-1.3 forbids
+ * the rendered bytes from depending on.
+ *
+ * So `fitParent` changes only the CSS PRESENTATION, never the backing store: with it set,
+ * the canvas's `width`/`height` ATTRIBUTES (what `renderWorld` draws to, and what AC-1.3
+ * compares) stay exactly `worldPixelSize(world, tileSize)`, and only the CSS `width`/
+ * `height` become `100%` of whatever box the caller places the canvas in. A responsive
+ * caller (`OpsScreen.tsx`'s build panel) gives that box a `max-width` capped at the
+ * intrinsic pixel size and an `aspect-ratio` matching it, so on a wide screen the box
+ * resolves to EXACTLY the intrinsic size (pixel-for-pixel identical to the non-responsive
+ * path, and therefore no different for AC-1.3) and only shrinks, proportionally, once the
+ * viewport is narrower than the map — which is precisely a phone.
+ *
+ * Defaults to `false`, so every caller that does not opt in (`SurveyScreen.tsx`, and every
+ * existing test) renders byte-for-byte what this component always rendered.
  */
-import { useLayoutEffect, useRef, type JSX } from 'react'
+import { useLayoutEffect, useRef, type CSSProperties, type JSX } from 'react'
 
 import type { World } from '../../sim/world'
 import { DEFAULT_TILE_SIZE, renderWorld, worldPixelSize } from './render-world'
+import type { StructureRenderEntry } from './render-world'
 
 export interface TerrainCanvasProps {
   /** The surveyed world to draw. Read only; never mutated. */
   readonly world: World
   /** Device pixels per tile. Defaults to {@link DEFAULT_TILE_SIZE}. */
   readonly tileSize?: number
+  /**
+   * The colony to draw over the terrain — every placed structure, complete or not. See
+   * `render-world.ts`'s `StructureRenderEntry`. Defaults to none, which is exactly what
+   * the survey screen (no colony exists yet) wants.
+   */
+  readonly structures?: readonly StructureRenderEntry[]
+  /**
+   * Fill the parent element's box responsively instead of the backing store's own fixed
+   * pixel size. See the header above: this changes CSS presentation only. Defaults to
+   * `false`.
+   */
+  readonly fitParent?: boolean
 }
 
 /**
@@ -50,6 +85,8 @@ export interface TerrainCanvasProps {
 export function TerrainCanvas({
   world,
   tileSize = DEFAULT_TILE_SIZE,
+  structures,
+  fitParent = false,
 }: TerrainCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { width, height } = worldPixelSize(world, tileSize)
@@ -75,8 +112,15 @@ export function TerrainCanvas({
     // The compile-time proof that `Painter2D` has not drifted from the real context: a
     // real `CanvasRenderingContext2D` is passed straight in, so a missing or mistyped
     // member fails `npm run typecheck`.
-    renderWorld(context, world, { tileSize })
-  }, [world, tileSize])
+    renderWorld(context, world, { tileSize, structures })
+  }, [world, tileSize, structures])
+
+  // `fitParent`: CSS presentation only — see the `fitParent` header above. The `width`/
+  // `height` ATTRIBUTES just below (the backing store AC-1.3 compares) are unaffected
+  // either way.
+  const style: CSSProperties = fitParent
+    ? { width: '100%', height: '100%', display: 'block' }
+    : { width: `${String(width)}px`, height: `${String(height)}px`, display: 'block' }
 
   return (
     <canvas
@@ -84,8 +128,7 @@ export function TerrainCanvas({
       data-testid="terrain-canvas"
       width={width}
       height={height}
-      // Equal to the backing store, in CSS pixels: see the docblock on scaling.
-      style={{ width: `${String(width)}px`, height: `${String(height)}px`, display: 'block' }}
+      style={style}
       role="img"
       aria-label="Martian surface survey: elevation shading, buildability and mineral deposits"
     />

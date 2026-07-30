@@ -106,4 +106,32 @@ describe('TerrainCanvas', () => {
     expect(() => render(<TerrainCanvas world={empty} />)).not.toThrow()
     expect(canvas().width).toBe(0)
   })
+
+  // -------------------------------------------------------------------------
+  // `fitParent` (aic-oby.8): responsive display without a responsive backing store
+  // -------------------------------------------------------------------------
+
+  it('should default to the fixed backing-store CSS size when fitParent is not given', () => {
+    // Every caller and every OTHER test in this file predates `fitParent` and must keep
+    // rendering byte-for-byte what this component always rendered.
+    render(<TerrainCanvas world={world} />)
+    const { width, height } = worldPixelSize(world, DEFAULT_TILE_SIZE)
+    expect(canvas().style.width).toBe(`${String(width)}px`)
+    expect(canvas().style.height).toBe(`${String(height)}px`)
+  })
+
+  it('should fill the parent responsively when fitParent is true', () => {
+    render(<TerrainCanvas world={world} fitParent />)
+    expect(canvas().style.width).toBe('100%')
+    expect(canvas().style.height).toBe('100%')
+  })
+
+  it('should NOT change the backing store when fitParent is true — only the CSS', () => {
+    // The whole point of `fitParent`: the bytes AC-1.3 compares (the backing store) must
+    // be identical whether or not the CSS presentation is responsive.
+    render(<TerrainCanvas world={world} fitParent />)
+    const expected = worldPixelSize(world, DEFAULT_TILE_SIZE)
+    expect(canvas().width).toBe(expected.width)
+    expect(canvas().height).toBe(expected.height)
+  })
 })

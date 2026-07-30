@@ -57,8 +57,15 @@
  *      buildable with no legend required.
  *   4. Graticule — a faint survey grid every `GRATICULE_TILE_INTERVAL` tiles, for
  *      judging distance and hull separation by eye.
- *   5. Deposits — last, so a marker is never painted over by the ground beneath it,
- *      differentiated by `kind` in both silhouette and colour.
+ *   5. Deposits — differentiated by `kind` in both silhouette and colour.
+ *   6. Structures (aic-oby.8) — the colony itself: every placed structure, at its real
+ *      footprint tiles, drawn LAST so a building is never painted over by the ground or
+ *      a deposit marker beneath it. This is the fix for "the colony is invisible": before
+ *      it existed, a player who had queued three structures saw an empty map — the
+ *      confirmation said "Queued Sinter Press at (36, 42)" and nothing appeared there.
+ *      See {@link StructureRenderEntry} for why this layer takes an already-decided
+ *      projection rather than a `ColonyState` — constitution §4 again: this module
+ *      decides no structure's completeness, it draws what it is told.
  *
  * Layers 2 and 3 are separate full passes rather than interleaved per tile. Interleaving
  * would produce the same picture today only because the shade never leaves its own tile;
@@ -66,6 +73,7 @@
  * coincidence of the current shade shape.
  */
 
+import type { Coord } from '../../sim/grid'
 import { buildabilityAt } from '../../sim/buildability'
 import { elevationAt } from '../../sim/terrain'
 import type { World } from '../../sim/world'
@@ -73,11 +81,14 @@ import type { DepositMarker, Rgb } from './mars-palette'
 import {
   MARS_VOID,
   SLOPE_SHADE,
+  STRUCTURE_INCOMPLETE_FILL_ALPHA,
+  STRUCTURE_OUTLINE,
   depositMarker,
   elevationColour,
   rgbCss,
   rgbaCss,
   slopeShadeAlpha,
+  structureFill,
 } from './mars-palette'
 
 /**
@@ -164,10 +175,42 @@ export interface CanvasPixelSize {
   readonly height: number
 }
 
+/**
+ * One structure to draw over the terrain — a PROJECTION of a `ConstructionProject`, never
+ * the project itself.
+ *
+ * This is the seam constitution §4 requires: `render-world.ts` may not decide whether a
+ * structure is complete (that is `construction.ts`'s `isProjectComplete`, a sim function),
+ * so the caller asks the sim and hands over the already-decided answer as a plain
+ * boolean. `src/app/screens/ops/build-view.ts`'s `colonyStructures` is that caller.
+ *
+ * `kind` is `StructureType.id`, looked up through `mars-palette.ts`'s `structureFill` —
+ * open, exactly like `MineralDeposit.kind`, so a structure this palette has never heard of
+ * still gets a stable, visible colour rather than vanishing (see `structureFill`'s doc).
+ */
+export interface StructureRenderEntry {
+  readonly kind: string
+  /** Every absolute tile this structure instance occupies, in the caller's own order. */
+  readonly tiles: readonly Coord[]
+  /** The sim's own verdict (`isProjectComplete`) — never recomputed here. */
+  readonly complete: boolean
+}
+
+/** No structures — the default every caller that has no colony (the survey screen) gets. */
+const NO_STRUCTURES: readonly StructureRenderEntry[] = []
+
 /** Options for {@link renderWorld}. */
 export interface RenderWorldOptions {
   /** Device pixels per tile. Defaults to {@link DEFAULT_TILE_SIZE}. */
   readonly tileSize?: number
+  /**
+   * The colony to draw over the terrain, complete and in-progress alike. Defaults to
+   * none: the survey screen has no colony yet, and passing nothing here must draw
+   * exactly what this module drew before this option existed — see
+   * `tests/unit/render-world.test.ts`'s determinism suite, which calls `renderWorld`
+   * with no `structures` at all and pins the exact trace.
+   */
+  readonly structures?: readonly StructureRenderEntry[]
 }
 
 /**
@@ -240,6 +283,7 @@ export function renderWorld(
   drawSlopeShade(painter, world, tileSize, width, height)
   drawGraticule(painter, tileSize, pixelWidth, pixelHeight)
   drawDeposits(painter, world, tileSize, width, height)
+  drawStructures(painter, options.structures ?? NO_STRUCTURES, tileSize, width, height)
 }
 
 /** Layer 2: the shaded Mars base, one rectangle per tile, row-major. */
@@ -396,4 +440,82 @@ function traceMarker(
   painter.lineTo(centreX + radius, centreY + radius)
   painter.lineTo(centreX - radius, centreY + radius)
   painter.closePath()
+}
+
+/**
+ * Layer 6: the colony — every structure in `structures`, at its real footprint tiles.
+ *
+ * PER-TILE, not per-structure-bounding-box, and deliberately so: a footprint is not
+ * guaranteed rectangular by anything in `catalog.ts` (only that it includes its anchor),
+ * so drawing a bounding box around `tiles` could paint over ground the structure does
+ * not actually occupy. Walking `tiles` one at a time is correct for any footprint shape
+ * and costs nothing extra for the rectangular ones the MVP catalog ships today.
+ *
+ * COMPLETE reads as a solid, opaque fill. IN-PROGRESS reads as an unmistakably different
+ * state: a faint wash of the same colour (`STRUCTURE_INCOMPLETE_FILL_ALPHA`) plus a
+ * diagonal hatch stroke through the tile — "outline and hatch", mirroring the game's own
+ * rule that an incomplete structure produces nothing (`construction.ts`'s
+ * `toResourceFlow`). Every tile is also stroked with a dark outline regardless of
+ * completeness, so a structure's edge reads against terrain of a similar hue.
+ *
+ * Fixed iteration order: `structures` in the caller's own array order (the colony's own
+ * queue order, itself deterministic — see `construction.ts`), and each structure's
+ * `tiles` in ITS OWN array order. No sorting, no Set, no Map.
+ */
+function drawStructures(
+  painter: Painter2D,
+  structures: readonly StructureRenderEntry[],
+  tileSize: number,
+  width: number,
+  height: number,
+): void {
+  const outline = rgbCss(STRUCTURE_OUTLINE)
+
+  for (const structure of structures) {
+    const fill = structureFill(structure.kind)
+    const fillStyle = structure.complete ? rgbCss(fill) : rgbaCss(fill, STRUCTURE_INCOMPLETE_FILL_ALPHA)
+
+    for (const tile of structure.tiles) {
+      // Defence in depth, matching `drawDeposits`: a hand-built or stale colony could name
+      // a tile outside the current grid, and painting outside the backing store is not
+      // something to discover from a screenshot diff.
+      if (tile.x < 0 || tile.y < 0 || tile.x >= width || tile.y >= height) continue
+
+      const left = tile.x * tileSize
+      const top = tile.y * tileSize
+
+      painter.fillStyle = fillStyle
+      painter.fillRect(left, top, tileSize, tileSize)
+
+      painter.strokeStyle = outline
+      strokeTileOutline(painter, left, top, tileSize)
+
+      if (!structure.complete) drawIncompleteHatch(painter, left, top, tileSize)
+    }
+  }
+}
+
+/** One tile's edge, stroked as a closed path — see `traceMarker`'s identical square shape. */
+function strokeTileOutline(painter: Painter2D, left: number, top: number, tileSize: number): void {
+  painter.beginPath()
+  painter.moveTo(left, top)
+  painter.lineTo(left + tileSize, top)
+  painter.lineTo(left + tileSize, top + tileSize)
+  painter.lineTo(left, top + tileSize)
+  painter.closePath()
+  painter.stroke()
+}
+
+/**
+ * One diagonal stroke corner to corner — the "hatch" half of "outline/hatch" for a
+ * structure still under construction. A single line rather than a cross-hatch: at
+ * `DEFAULT_TILE_SIZE` (8 device pixels) a tile is small enough that more lines would be
+ * noise rather than texture, and a multi-tile footprint already reads as hatched overall
+ * because every one of its tiles carries the same diagonal.
+ */
+function drawIncompleteHatch(painter: Painter2D, left: number, top: number, tileSize: number): void {
+  painter.beginPath()
+  painter.moveTo(left, top)
+  painter.lineTo(left + tileSize, top + tileSize)
+  painter.stroke()
 }
