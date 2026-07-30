@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { computeBalances, applyLedger } from '../../src/sim/ledger'
 import type { ResourceFlow, Stockpile } from '../../src/sim/ledger'
 import { createCatalog, getStructureType } from '../../src/sim/catalog'
+// For the three-stage-chain test: netting the whole chain in declaration order.
+import { listStructureTypes } from '../../src/sim/catalog'
 
 /** A minimal flow; individual tests override just the field under test. */
 function flow(overrides: Partial<ResourceFlow> = {}): ResourceFlow {
@@ -343,5 +345,218 @@ describe('ledger — integer base units (Wh / grams)', () => {
     const result = applyLedger([flow({ consumes: { electricity: huge } })], { electricity: huge })
     expect(result.stockpiles).toEqual({ electricity: 0 })
     expect(result.shortfalls).toEqual([])
+  })
+})
+
+describe('ledger — a one-time buildCost is NOT a per-turn flow', () => {
+  // WHY THIS BLOCK EXISTS: `buildCost` and `consumes` are both resource debits in
+  // the same base units on the same object, so the single most likely bug in the
+  // whole resource-chain epic is one of them being charged where the other belongs
+  // — a bill of materials silently billed EVERY TURN, or upkeep charged once and
+  // then never again. `ResourceFlow` is deliberately just `{ produces, consumes }`,
+  // so a `StructureType` satisfies it while its `buildCost` and `storageCapacity`
+  // are structurally invisible to this module. These tests pin that invisibility so
+  // it cannot be "helpfully" fixed later.
+
+  /** Registers one structure through the real catalog boundary and returns it. */
+  function catalogType(spec: Parameters<typeof createCatalog>[0][number]) {
+    const type = getStructureType(createCatalog([spec]), spec.id)
+    expect(type).toBeDefined()
+    return type!
+  }
+
+  it('should ignore a buildCost-only resource entirely when netting a turn', () => {
+    // A PV Array costs 20 kg of silicon to BUILD and draws nothing to run. After it
+    // is standing, a turn must show no silicon movement whatsoever — not 20_000 g of
+    // consumption, and not a silicon balance line at all.
+    const pvArray = catalogType({
+      id: 'pv-array',
+      name: 'Photovoltaic Array',
+      footprint: [{ dx: 0, dy: 0 }],
+      buildTurns: 3,
+      buildCost: { silicon: 20_000 },
+      produces: { electricity: 125_000 },
+      consumes: {},
+      habitatCapacity: 0,
+    })
+
+    expect(computeBalances([pvArray])).toEqual([
+      { resource: 'electricity', produced: 125_000, consumed: 0, net: 125_000 },
+    ])
+  })
+
+  it('should not touch a stockpile of a resource that only appears in buildCost', () => {
+    const pvArray = catalogType({
+      id: 'pv-array',
+      name: 'Photovoltaic Array',
+      footprint: [{ dx: 0, dy: 0 }],
+      buildTurns: 3,
+      buildCost: { silicon: 20_000 },
+      produces: { electricity: 125_000 },
+      consumes: {},
+      habitatCapacity: 0,
+    })
+
+    // The silicon stockpile passes through untouched: 500 in, 500 out. If buildCost
+    // were being read as a flow this would be 0 with a 19_500 g shortfall.
+    const result = applyLedger([pvArray], { silicon: 500 })
+    expect(result.stockpiles).toEqual({ silicon: 500, electricity: 125_000 })
+    expect(result.shortfalls).toEqual([])
+  })
+
+  it('should charge only the per-turn consumes when a resource appears in BOTH maps', () => {
+    // The confusable case made explicit: a Sinter Plant costs 5 kg of regolith once
+    // to build and eats 40 kg of regolith every turn. Exactly 40_000 g must be
+    // charged — never 45_000 (both), never 5_000 (the wrong one).
+    const sinterPlant = catalogType({
+      id: 'sinter-plant',
+      name: 'Sinter Plant',
+      footprint: [{ dx: 0, dy: 0 }],
+      buildTurns: 8,
+      buildCost: { regolith: 5_000 },
+      produces: { sinteredPlate: 30_000 },
+      consumes: { regolith: 40_000 },
+      habitatCapacity: 0,
+    })
+
+    expect(computeBalances([sinterPlant])).toEqual([
+      { resource: 'regolith', produced: 0, consumed: 40_000, net: -40_000 },
+      { resource: 'sinteredPlate', produced: 30_000, consumed: 0, net: 30_000 },
+    ])
+  })
+
+  it('should not re-charge buildCost on every turn of a long run', () => {
+    // The sharpest statement of the bug this field could cause. Over 100 turns a
+    // structure with a 20 kg silicon bill of materials must draw silicon zero times.
+    // If buildCost ever leaked into the flow, this would end 2_000_000 g short.
+    const pvArray = catalogType({
+      id: 'pv-array',
+      name: 'Photovoltaic Array',
+      footprint: [{ dx: 0, dy: 0 }],
+      buildTurns: 3,
+      buildCost: { silicon: 20_000 },
+      produces: { electricity: 125_000 },
+      consumes: {},
+      habitatCapacity: 0,
+    })
+
+    let stockpiles: Stockpile = { silicon: 1_000 }
+    for (let turn = 0; turn < 100; turn += 1) {
+      stockpiles = applyLedger([pvArray], stockpiles).stockpiles
+    }
+    expect(stockpiles).toEqual({ silicon: 1_000, electricity: 100 * 125_000 })
+  })
+
+  it('should ignore storageCapacity when netting a turn', () => {
+    // A cap is not a flow either. A pure silo — no produces, no consumes, 1 t of
+    // regolith capacity — must net nothing at all.
+    const silo = catalogType({
+      id: 'regolith-silo',
+      name: 'Regolith Silo',
+      footprint: [{ dx: 0, dy: 0 }],
+      buildTurns: 2,
+      produces: {},
+      consumes: {},
+      storageCapacity: { regolith: 1_000_000 },
+      habitatCapacity: 0,
+    })
+
+    expect(computeBalances([silo])).toEqual([])
+    expect(applyLedger([silo], { regolith: 42 })).toMatchObject({
+      stockpiles: { regolith: 42 },
+      shortfalls: [],
+    })
+  })
+
+  it('OPEN GAP: applyLedger does not yet clamp stockpiles to storageCapacity', () => {
+    // Deliberate, documented scope boundary — NOT an endorsement of unbounded
+    // accumulation. aic-c75 adds the storageCapacity FIELD and its validation;
+    // aggregating caps across completed structures and deciding overflow semantics
+    // belongs to the chain beads that own turn resolution, exactly as the
+    // placement-time `requiresDeposit` check does.
+    //
+    // This test exists so the gap is VISIBLE rather than silent: whoever implements
+    // capping will see it fail and must consciously replace it with the real
+    // overflow assertions. Overflow must then be reported as structured data,
+    // symmetric with `Shortfall` — a silently discarded surplus is precisely the
+    // ledger bug the field was introduced to prevent.
+    const silo = catalogType({
+      id: 'tiny-silo',
+      name: 'Tiny Silo',
+      footprint: [{ dx: 0, dy: 0 }],
+      buildTurns: 1,
+      produces: { regolith: 900 },
+      consumes: {},
+      storageCapacity: { regolith: 1_000 },
+      habitatCapacity: 0,
+    })
+
+    // Two turns of 900 g into a 1_000 g silo. Today: 1_800, uncapped.
+    const afterOne = applyLedger([silo]).stockpiles
+    const afterTwo = applyLedger([silo], afterOne).stockpiles
+    expect(afterTwo).toEqual({ regolith: 1_800 })
+    expect(afterTwo.regolith).toBeGreaterThan(silo.storageCapacity.regolith!)
+  })
+
+  it('should net a full three-stage chain assembled from catalog data alone', () => {
+    // extract → refine → consume, with invented resources and every new field in
+    // play, netted by a ledger that knows nothing about any of them. This is the
+    // whole point of the shared foundation: the chains are data, the sim is not.
+    const catalog = createCatalog([
+      {
+        id: 'xenon-extractor',
+        name: 'Xenon Extractor',
+        footprint: [{ dx: 0, dy: 0 }],
+        buildTurns: 6,
+        buildCost: { plasteel: 12_000 },
+        siting: { requiresDeposit: 'xenon-vein' },
+        produces: { xenonOre: 500_000 },
+        consumes: { electricity: 40_000 },
+        storageCapacity: { xenonOre: 2_000_000 },
+        habitatCapacity: 0,
+      },
+      {
+        id: 'xenon-refinery',
+        name: 'Xenon Refinery',
+        footprint: [{ dx: 0, dy: 0 }],
+        buildTurns: 9,
+        buildCost: { plasteel: 30_000 },
+        produces: { plasteel: 3_000 },
+        consumes: { xenonOre: 500_000, electricity: 90_000 },
+        storageCapacity: { plasteel: 100_000 },
+        habitatCapacity: 0,
+      },
+      {
+        id: 'plasteel-barracks',
+        name: 'Plasteel Barracks',
+        footprint: [{ dx: 0, dy: 0 }],
+        buildTurns: 4,
+        buildCost: { plasteel: 5_000 },
+        produces: {},
+        consumes: { plasteel: 100, electricity: 8_000 },
+        habitatCapacity: 8,
+      },
+    ])
+
+    const chain = listStructureTypes(catalog)
+    const result = applyLedger(chain, { electricity: 200_000 })
+
+    // The ore is fully consumed by the refinery in the same turn it is extracted;
+    // plasteel accumulates net of the barracks' upkeep; electricity draws down.
+    expect(result.stockpiles).toEqual({
+      electricity: 200_000 - 40_000 - 90_000 - 8_000,
+      plasteel: 3_000 - 100,
+      xenonOre: 0,
+    })
+    expect(result.shortfalls).toEqual([])
+
+    // None of the three bills of materials appear anywhere in the turn's accounting:
+    // 47_000 g of plasteel was owed at CONSTRUCTION time, and this is a turn.
+    expect(result.balances.find((b) => b.resource === 'plasteel')).toEqual({
+      resource: 'plasteel',
+      produced: 3_000,
+      consumed: 100,
+      net: 2_900,
+    })
   })
 })

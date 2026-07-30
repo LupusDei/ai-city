@@ -40,6 +40,41 @@
  *   figures sit ~8 orders of magnitude below it, so this is a documented boundary
  *   rather than a practical constraint.
  * ============================================================================
+ *
+ * ============================================================================
+ * ONE-TIME COST vs PER-TURN FLOW — THE OTHER THING TO GET RIGHT
+ * ----------------------------------------------------------------------------
+ * A structure carries THREE resource maps that all look alike (same type, same
+ * base units, same integer rule) and mean completely different things. Charging
+ * one where another belongs is the single most likely bug in the resource-chain
+ * work, so the distinction is spelled out once, here:
+ *
+ *   `buildCost`        ONE-TIME.  Debited ONCE, at construction. A bill of
+ *                      materials. "This Photovoltaic Array costs 20 kg of
+ *                      silicon to BUILD" -> `{ silicon: 20_000 }`.
+ *   `consumes`         PER-TURN.  Debited EVERY TURN the structure operates.
+ *                      An operating draw. "This Sinter Plant eats 40 kg of
+ *                      regolith A TURN" -> `{ regolith: 40_000 }`.
+ *   `storageCapacity`  NEITHER.   Not a debit at all. A CAP — the most of a
+ *                      resource this structure lets the colony hold.
+ *
+ * The read-aloud test: `buildCost` completes "...to build one", `consumes`
+ * completes "...per turn, forever", `storageCapacity` completes "...can be
+ * stored here at once". If a number does not fit exactly one of those
+ * sentences, it is in the wrong map.
+ *
+ * A resource may legitimately appear in several: a Sinter Plant can cost 5 kg
+ * of regolith to build AND eat 40 kg a turn AND buffer 300 kg. Those are three
+ * independent facts, and nothing anywhere may merge or substitute them.
+ *
+ * The distinction is enforced STRUCTURALLY, not by convention. `ledger.ts`
+ * defines per-turn netting over `ResourceFlow`, which is exactly
+ * `{ produces, consumes }` — so a `StructureType` satisfies it while
+ * `buildCost` and `storageCapacity` are invisible to the ledger and CANNOT be
+ * charged per-turn by accident. Whoever spends a `buildCost` must do it once,
+ * at the point construction is committed, and must not route it through the
+ * per-turn ledger. See the matching block in `ledger.ts`.
+ * ============================================================================
  */
 
 /** A tile offset relative to a structure's anchor tile. */
@@ -49,7 +84,14 @@ export interface FootprintOffset {
 }
 
 /**
- * Per-turn resource amounts, keyed by resource kind.
+ * Resource amounts keyed by resource kind.
+ *
+ * Deliberately UNTIMED: this type says "how much of what", never "how often".
+ * The same shape carries a per-turn flow (`produces`/`consumes`), a one-time
+ * bill of materials (`buildCost`) and a stockpile cap (`storageCapacity`), and
+ * WHICH of those a given map is comes entirely from the field it sits in — see
+ * the one-time-vs-per-turn block at the top of this file. A `PerTurnAmounts`
+ * alias would have made three of the four fields lie.
  *
  * Deliberately an open string-keyed record rather than a closed union: the MVP only
  * constrains `electricity`, but silica/oxygen/hydrogen/carbon/metals must drop in as
@@ -64,6 +106,44 @@ export interface FootprintOffset {
  */
 export type ResourceAmounts = Readonly<Record<string, number>>
 
+/**
+ * Where a structure is allowed to stand, beyond the generic bounds and occupancy
+ * checks `placement.ts` already applies to every structure.
+ *
+ * Every member is OPTIONAL, and absence means "no requirement of that kind". The
+ * overwhelming majority of structures can go on any buildable tile, so a
+ * structure with no siting constraints is simply `{}` — requiring every catalog
+ * entry to declare an empty siting block would be ceremony that buys nothing.
+ *
+ * A nested object rather than a flat `requiresDeposit` field on the spec because
+ * this is the first of a family: slope limits, latitude bands, minimum distance
+ * from a neighbour and "must abut a road" are all the same kind of statement, and
+ * they belong grouped under one namespace rather than accreting as loose
+ * top-level fields.
+ */
+export interface SitingRequirements {
+  /**
+   * The structure may only be placed on a `MineralDeposit` whose `kind` equals
+   * this value — "site this Sifter on a SILICA deposit". Absent (the common case)
+   * means the structure has no deposit requirement at all.
+   *
+   * An OPEN string key, exactly like `MineralDeposit.kind` in `buildability.ts`
+   * and for the same reason: a new deposit kind must be addable as DATA. A closed
+   * union here would mean every invented kind needed a source edit in this file,
+   * which is the coupling both modules exist to avoid. Validated as a non-empty
+   * string at the `createCatalog` boundary, matching how `eligibleDepositKinds`
+   * validates the kind registry itself; whether the named kind is actually
+   * REGISTERED in a given world is not knowable here and is not checked.
+   *
+   * This module holds the requirement, never the check. `catalog.ts` knows
+   * nothing about grids, tiles or deposits, so enforcing this at placement time —
+   * including the genuine design question of whether the deposit must lie under
+   * the ANCHOR or merely under some footprint tile — belongs to the placement
+   * rule that consumes this field, not here.
+   */
+  readonly requiresDeposit?: string
+}
+
 /** The raw, caller-supplied shape. Validated by `createCatalog`. */
 export interface StructureTypeSpec {
   readonly id: string
@@ -72,14 +152,88 @@ export interface StructureTypeSpec {
   readonly footprint: readonly FootprintOffset[]
   /** Turns of drone work to complete. `0` means pre-placed (e.g. a landed starship). */
   readonly buildTurns: number
+  /** PER-TURN output while operating. See the one-time-vs-per-turn block above. */
   readonly produces: ResourceAmounts
+  /**
+   * PER-TURN operating draw while running — NOT what the structure costs to
+   * build. That is {@link StructureTypeSpec.buildCost}. See the
+   * one-time-vs-per-turn block at the top of this file before touching either.
+   */
   readonly consumes: ResourceAmounts
+  /**
+   * ONE-TIME bill of materials: what it costs to BUILD one, debited once when
+   * construction is committed — NOT a recurring draw. That is
+   * {@link StructureTypeSpec.consumes}.
+   *
+   *   Photovoltaic Array -> `{ silicon: 20_000 }`         (20 kg of silicon, once)
+   *   Shield Berm        -> `{ regolith: 450_000_000,
+   *                            sinteredPlate: 7_500_000 }` (450 t + 7.5 t, once)
+   *
+   * This field is what makes a production chain a game rather than a rising
+   * number: without it there is nowhere to record what a structure costs, so
+   * refined output can never be SPENT on anything. Amounts are non-negative
+   * integers in base units, same rule as every other resource map.
+   *
+   * Optional for authoring — most MVP structures are free to build, and absence
+   * normalises to `{}` on the validated {@link StructureType}, so consumers never
+   * write `?? {}`. Absent and `{}` mean exactly the same thing ("free").
+   */
+  readonly buildCost?: ResourceAmounts
+  /**
+   * Placement constraints. Optional: absent means "may be built on any buildable
+   * tile", which is the common case. Normalised to `{}` on the validated
+   * {@link StructureType}, so consumers read `type.siting.requiresDeposit`
+   * without optional chaining.
+   */
+  readonly siting?: SitingRequirements
+  /**
+   * How much of each resource this structure lets the colony STOCKPILE — a cap,
+   * not a flow and not a cost. Nothing is debited or credited by this field.
+   *
+   * Unbounded accumulation removes every logistics decision from the game: with
+   * infinite storage there is never a reason to build a hopper, throttle a mine,
+   * or prioritise a haul. Caps are what make those choices exist.
+   *
+   * Optional; absent or `{}` means "stores nothing". A cap of exactly `0` for a
+   * named resource is deliberately distinct from omitting the key — it states
+   * "this structure handles regolith but buffers none of it", which a
+   * just-in-time hauling rule needs to be able to say. Non-negative integers in
+   * base units.
+   *
+   * NOTE: this is the DECLARATION of a cap. Aggregating caps across a colony's
+   * completed structures and deciding what happens to an overflow is turn
+   * resolution's job, not the catalog's — and when that lands, an overflow must
+   * be reported as structured data (symmetric with `ledger.ts`'s `Shortfall`),
+   * because a silently discarded surplus is exactly the bug this field exists to
+   * make impossible.
+   */
+  readonly storageCapacity?: ResourceAmounts
   /** Colonists this structure can house once complete. `0` for non-habitat structures. */
   readonly habitatCapacity: number
 }
 
-/** A validated structure type. Structurally identical to the spec, but trusted. */
-export type StructureType = StructureTypeSpec
+/**
+ * A validated structure type: the same information as the spec, but trusted, and
+ * with the optional authoring conveniences resolved.
+ *
+ * `buildCost`, `siting` and `storageCapacity` are OPTIONAL on the spec and
+ * REQUIRED here — `createCatalog` normalises an absent one to `{}`. That
+ * asymmetry is the point. Authoring stays terse (write a field only when it means
+ * something) while every CONSUMER gets exactly one shape to read, so no
+ * downstream code needs `type.buildCost ?? {}` or `type.siting?.requiresDeposit`
+ * — and no consumer can accidentally treat "author omitted it" differently from
+ * "author wrote `{}`", since those are the same statement. `produces` and
+ * `consumes` have always worked this way (required, authored as `{}`); after
+ * validation the three new fields match them exactly.
+ *
+ * Still assignable to `StructureTypeSpec`, so a validated type can be fed back
+ * into `createCatalog` (e.g. a save-file round trip) without adaptation.
+ */
+export interface StructureType extends StructureTypeSpec {
+  readonly buildCost: ResourceAmounts
+  readonly siting: SitingRequirements
+  readonly storageCapacity: ResourceAmounts
+}
 
 /**
  * A validated, immutable set of structure types.
@@ -139,13 +293,23 @@ function validateFootprint(id: string, footprint: readonly FootprintOffset[]): v
 }
 
 /**
- * Validate one `produces`/`consumes` map.
+ * Validate ANY resource-amounts map — `produces`, `consumes`, `buildCost` or
+ * `storageCapacity`. One function for all four deliberately: the integer base-unit
+ * rule is a property of an AMOUNT, identical whether that amount is charged per
+ * turn, charged once, or never charged at all. Four near-identical guards would be
+ * the thing that eventually drifts, and a `buildCost` that quietly accepted 0.5 g
+ * would break the determinism argument just as thoroughly as a `consumes` that did.
  *
  * Amounts must be non-negative INTEGERS in base units (Wh / grams) — the same
  * discipline `time.ts` applies to the clock, for the same reason; see the
  * base-units block at the top of this file. Enforced with the shared
  * `assertNonNegativeInteger` rather than a bespoke check so there is exactly one
  * definition of "whole unit" in the module.
+ *
+ * `label` is the field name and becomes part of the thrown message as
+ * `<label>.<resource>`, so a failure says WHICH of the four maps was wrong — the
+ * difference between "buildCost.silicon must be a non-negative integer" and an
+ * error the author has to go guess at.
  *
  * Note what is NOT constrained: the resource KEY space stays open. A brand-new
  * resource kind is still pure data — the integer rule is a property of amounts,
@@ -160,12 +324,44 @@ function validateResourceAmounts(id: string, amounts: ResourceAmounts, label: st
   }
 }
 
+/**
+ * Validate a `siting` block.
+ *
+ * `requiresDeposit` is checked only for PRESENCE-and-non-emptiness, matching how
+ * `eligibleDepositKinds` validates a deposit-kind registry: the key space is open,
+ * so the one thing knowable here is that an empty kind can never match any
+ * deposit. Left unchecked, an empty string would present as "this structure can
+ * never be placed anywhere, and nobody can say why" — a runtime mystery instead of
+ * a load-time defect.
+ *
+ * Absent is legal and is the common case; it is not defaulted to some sentinel
+ * kind, because "no requirement" and "requires kind X" are genuinely different
+ * statements.
+ */
+function validateSiting(id: string, siting: SitingRequirements): void {
+  const { requiresDeposit } = siting
+  if (requiresDeposit !== undefined && requiresDeposit.length === 0) {
+    throw new RangeError(
+      `Structure "${id}": siting.requiresDeposit must be a non-empty string when present, ` +
+        `received: ${JSON.stringify(requiresDeposit)}`,
+    )
+  }
+}
+
 function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   const { id } = specification
 
   if (id.length === 0) {
     throw new RangeError('Structure id must be a non-empty string')
   }
+
+  // Resolve the optional authoring fields ONCE, before validation, so the value
+  // that gets validated is exactly the value that gets stored. Validating
+  // `specification.buildCost` and separately defaulting it in the return object
+  // would leave room for the two to disagree.
+  const buildCost = specification.buildCost ?? {}
+  const siting = specification.siting ?? {}
+  const storageCapacity = specification.storageCapacity ?? {}
 
   validateFootprint(id, specification.footprint)
   assertNonNegativeInteger(specification.buildTurns, `Structure "${id}": buildTurns`)
@@ -175,14 +371,25 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   )
   validateResourceAmounts(id, specification.produces, 'produces')
   validateResourceAmounts(id, specification.consumes, 'consumes')
+  validateResourceAmounts(id, buildCost, 'buildCost')
+  validateResourceAmounts(id, storageCapacity, 'storageCapacity')
+  validateSiting(id, siting)
 
   // Defensive copy of every mutable member: a catalog that aliases caller-owned
-  // arrays or objects can be corrupted after it has already been validated.
+  // arrays or objects can be corrupted after it has already been validated —
+  // including corrupted into a state that could never have passed validation, such
+  // as a negative buildCost. Every map below is copied, not just the pre-existing
+  // ones, and one authored object shared across two entries yields two independent
+  // copies. `siting` is flat today so a spread copies it fully; if it ever gains a
+  // nested member (a slope range, a latitude band) this copy must deepen with it.
   return {
     ...specification,
     footprint: specification.footprint.map(({ dx, dy }) => ({ dx, dy })),
     produces: { ...specification.produces },
     consumes: { ...specification.consumes },
+    buildCost: { ...buildCost },
+    siting: { ...siting },
+    storageCapacity: { ...storageCapacity },
   }
 }
 

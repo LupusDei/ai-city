@@ -56,6 +56,18 @@ import type { ResourceAmounts } from './catalog'
  * separate from `StructureType` itself so the ledger has zero coupling to how
  * a structure came to exist (catalog, save-file migration, a future test
  * fixture, etc.); it only needs the two resource maps.
+ *
+ * WHAT IS DELIBERATELY ABSENT: a `StructureType` also carries `buildCost` (a
+ * ONE-TIME bill of materials) and `storageCapacity` (a stockpile cap). Neither
+ * is a per-turn flow, so neither appears here — and because a structure is
+ * accepted STRUCTURALLY, those two fields are simply invisible to this module.
+ * That invisibility is load-bearing, not incidental: `buildCost` and `consumes`
+ * are both resource debits in the same base units on the same object, and the
+ * single most likely bug in the resource-chain work is a bill of materials
+ * getting billed every turn. Widening `ResourceFlow` to mention `buildCost`, or
+ * reading it anywhere below, would reintroduce exactly that. A build cost is
+ * debited ONCE by whoever commits the construction; it must never be routed
+ * through per-turn netting. See the one-time-vs-per-turn block in `catalog.ts`.
  */
 export interface ResourceFlow {
   readonly produces: ResourceAmounts
@@ -173,6 +185,16 @@ export function computeBalances(flows: readonly ResourceFlow[]): readonly Resour
  * `stockpiles` defaults to empty so a brand-new colony can call this with no
  * second argument. The input `stockpiles` object is never mutated — a fresh
  * object is always returned — so a caller can safely diff old vs. new state.
+ *
+ * KNOWN GAP — no upper bound yet. Stockpiles are clamped at zero from below but
+ * are currently UNBOUNDED from above, even though `StructureTypeSpec` can now
+ * declare a `storageCapacity`. Applying that cap needs something this function
+ * does not have: the colony's set of completed structures, to sum capacity from.
+ * When it is wired up, an overflow MUST be reported as structured data —
+ * symmetric with `Shortfall`, e.g. an `Overflow { resource, amount }` — and must
+ * not be silently discarded. A surplus that vanishes without a trace is the same
+ * class of bug as a stockpile silently going negative, and it will not surface
+ * until balance work, by which point the numbers will already be wrong.
  */
 export function applyLedger(
   flows: readonly ResourceFlow[],
