@@ -562,3 +562,61 @@ describe('releaseTiles', () => {
     expect(tileAt(occupiedGrid, { x: 0, y: 0 })?.occupantId).toBe('hab-1')
   })
 })
+
+describe('no storing labour (aic-chg) — whole build-turns only', () => {
+  // RULED BY THE GENERAL: "No storing labor at all." Unspent robot-hours are lost at
+  // end of turn; they are never banked on a project so it can finish a build-turn
+  // later. Labour is therefore applied only in WHOLE build-turn units, and any
+  // remainder is reported unused rather than accumulated.
+  //
+  // This also removes a real bug at the root rather than patching it.
+  // `turnsCompletedFor` floors `accumulatedLabourHours / hoursPerTurn` with NO
+  // epsilon, while `drones.ts` added FLOOR_EPSILON for exactly that hazard. Once
+  // fractional labour entered (spec 003's panel cleaning), a 1e-13 deficit would
+  // have flipped a habitat to incomplete, contributing zero capacity and losing the
+  // mission. Constraining progress to whole multiples makes the quotient exact, so
+  // no epsilon is needed — the class of error stops existing.
+  const perTurn = requiredLabourHoursPerBuildTurn(TEST_CYCLE)
+
+  function padProject() {
+    const grid = freshGrid()
+    return projectAt('p1', PAD, grid, 0, 0).project
+  }
+
+  it('should not bank a partial build-turn across turns', () => {
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 1.5)
+    expect(result.labourHoursApplied).toBe(perTurn)
+    expect(result.labourHoursUnused).toBeCloseTo(perTurn * 0.5, 9)
+    expect(turnsCompletedFor(TEST_CYCLE, result.queue[0]!)).toBe(1)
+  })
+
+  it('should make no progress at all on labour below one whole build-turn', () => {
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 0.99)
+    expect(result.labourHoursApplied).toBe(0)
+    expect(result.labourHoursUnused).toBeCloseTo(perTurn * 0.99, 9)
+    expect(turnsCompletedFor(TEST_CYCLE, result.queue[0]!)).toBe(0)
+  })
+
+  it('should keep accumulated labour an exact multiple of one build-turn', () => {
+    let queue: ConstructionQueue = [padProject()]
+    for (let turn = 0; turn < 4; turn += 1) {
+      queue = advanceConstruction(TEST_CYCLE, queue, perTurn * 1.7).queue
+      expect(queue[0]!.accumulatedLabourHours % perTurn).toBe(0)
+    }
+  })
+
+  it('should leave no floor() quotient that would need an epsilon', () => {
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 2)
+    const acc = result.queue[0]!.accumulatedLabourHours
+    expect(Number.isInteger(acc / perTurn)).toBe(true)
+    expect(turnsCompletedFor(TEST_CYCLE, result.queue[0]!)).toBe(2)
+  })
+
+  it('should not accumulate past what a project required', () => {
+    // PAD needs 5 build-turns. Fund 8; only 5 may be taken.
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 8)
+    expect(result.labourHoursApplied).toBe(perTurn * 5)
+    expect(result.labourHoursUnused).toBe(perTurn * 3)
+    expect(isProjectComplete(TEST_CYCLE, result.queue[0]!)).toBe(true)
+  })
+})

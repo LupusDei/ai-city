@@ -437,10 +437,35 @@ export function advanceConstruction(
   let remaining = availableLabourHours
   const nextQueue: ConstructionProject[] = []
 
+  // Labour is granted only in WHOLE build-turn units.
+  //
+  // RULED BY THE GENERAL (aic-chg): "No storing labor at all." Unspent robot-hours
+  // are lost at the end of the turn; they are never banked against a project so it
+  // can finish a part-funded build-turn later. Taking `Math.min(remaining, needed)`
+  // — any amount that fits — would have banked a fraction of a build-turn on the
+  // project and carried it across the turn boundary, which is exactly the storage
+  // that ruling forbids.
+  //
+  // It also removes a latent bug at the ROOT rather than patching it.
+  // `turnsCompletedFor` divides `accumulatedLabourHours` by this same
+  // `hoursPerTurn` and floors it with NO epsilon, while `drones.ts` carries
+  // FLOOR_EPSILON for precisely that hazard. As soon as fractional labour entered
+  // the system (spec 003's panel cleaning is the first source), a 1e-13 deficit
+  // would have floored to one turn less, flipping a finished habitat to incomplete
+  // — contributing zero readiness and losing the mission on a rounding error.
+  // Because every grant here is an exact multiple, `accumulatedLabourHours` is
+  // always an exact multiple, so that quotient is exact and needs no epsilon. The
+  // class of error stops existing instead of being compensated for.
+  const hoursPerTurn = requiredLabourHoursPerBuildTurn(config)
+
   for (const project of queue) {
     const totalRequired = totalLabourHoursRequired(project.structureType, config)
     const needed = Math.max(0, totalRequired - project.accumulatedLabourHours)
-    const take = Math.min(remaining, needed)
+    // Whole build-turns the remaining labour can fund, then clamped to what the
+    // project still needs. `needed` is itself always a whole multiple, because
+    // accumulation starts at zero and only ever advances in these units.
+    const affordable = Math.floor(remaining / hoursPerTurn) * hoursPerTurn
+    const take = Math.min(affordable, needed)
     remaining -= take
 
     nextQueue.push(
