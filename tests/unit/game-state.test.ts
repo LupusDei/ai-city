@@ -31,6 +31,7 @@ import type { MissionConfig } from '../../src/sim/mission'
 import type { PlayerOrder } from '../../src/sim/orders'
 import { DEFAULT_TURN_CYCLE, totalTurns, turnDurationSeconds } from '../../src/sim/time'
 import { resolveTurn } from '../../src/sim/turn'
+import { generateStormTimeline } from '../../src/sim/weather'
 import { generateWorld } from '../../src/sim/world'
 
 import {
@@ -90,16 +91,16 @@ function asRunning(state: GameState): RunningState {
 }
 
 /** A surveying state with both hulls legally placed, ready to begin. */
-function readySurvey(mission?: MissionConfig): SurveyingState {
-  let state: GameState = beginSurvey({ seed: SEED, ...(mission === undefined ? {} : { mission }) })
+function readySurvey(mission?: MissionConfig, seed: number = SEED): SurveyingState {
+  let state: GameState = beginSurvey({ seed, ...(mission === undefined ? {} : { mission }) })
   state = dispatch(state, { kind: 'select-site', anchor: SITE_A })
   state = dispatch(state, { kind: 'select-site', anchor: SITE_B })
   return asSurveying(state)
 }
 
 /** A started colony at turn 1, nothing ordered yet. */
-function started(mission?: MissionConfig): RunningState {
-  return asRunning(dispatch(readySurvey(mission), { kind: 'begin-mission' }))
+function started(mission?: MissionConfig, seed: number = SEED): RunningState {
+  return asRunning(dispatch(readySurvey(mission, seed), { kind: 'begin-mission' }))
 }
 
 /** End the current cycle with the correct token. */
@@ -422,6 +423,75 @@ describe('dispatch(begin-mission)', () => {
     const next = asRunning(endCycle(running))
     expect(next.outlook?.turn).toBe(2)
     expect(next.outlook?.mission.turnsRemaining).toBe(276)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// weather (aic-oby.3) — proving the scheduler is genuinely wired into the adapter's
+// OWN turn loop, not merely available for a screen to call directly (which
+// `tests/unit/app-boundary.test.ts` forbids anyway).
+// ---------------------------------------------------------------------------
+
+describe('weather (aic-oby.3)', () => {
+  it('should generate the mission’s timeline from the session seed, once, at begin-mission', () => {
+    const running = started()
+    expect(running.weatherTimeline).toEqual(
+      generateStormTimeline(running.seed, totalTurns(running.colony.mission.turnCycle)),
+    )
+  })
+
+  it('should be a pure function of the seed — same seed, deep-equal timeline', () => {
+    expect(started().weatherTimeline).toEqual(started().weatherTimeline)
+  })
+
+  it('should generate a different timeline for a different seed', () => {
+    const a = started()
+    const b = started(undefined, SEED + 1)
+    expect(a.weatherTimeline).not.toEqual(b.weatherTimeline)
+  })
+
+  it('should set colony.environment for turn 1 before any turn resolves, matching the timeline directly', () => {
+    const running = started()
+    const stormActiveAtTurn1 = running.weatherTimeline.some(
+      (event) => event.startTurn <= 1 && 1 <= event.endTurn,
+    )
+    expect(running.colony.environment.dustStorm).toBe(stormActiveAtTurn1)
+  })
+
+  it('should carry a real storm through a live mission end to end — dustStorm flips true then false exactly at the scheduled turns', () => {
+    // A deterministic SEARCH for a seed whose default-tuned timeline starts a storm
+    // within a few turns of turn 1 — not a flaky retry, since `generateStormTimeline`
+    // is a pure function of the seed and this loop always lands on the same seed for
+    // the same search bounds. Mirrors this file's own "measured, not assumed" fixture
+    // discipline (see the header note on `SITE_A`/`SITE_B`).
+    const horizon = totalTurns(DEFAULT_MISSION.turnCycle)
+    let found: { readonly seed: number; readonly storm: { readonly startTurn: number; readonly endTurn: number } } | null = null
+    for (let seed = 1; seed <= 2000 && found === null; seed++) {
+      const timeline = generateStormTimeline(seed, horizon)
+      const first = timeline[0]
+      if (first !== undefined && first.startTurn <= 6) {
+        found = { seed, storm: first }
+      }
+    }
+    if (found === null) throw new Error('test setup: no seed within [1, 2000] starts a storm by turn 6')
+
+    // `observedByTurn.get(t)` is the dustStorm status of the colony about to RESOLVE
+    // turn `t` — keyed explicitly by turn number, rather than by array position, so an
+    // off-by-one in how many times `endCycle` has fired cannot silently misalign a
+    // plain array index against the turn it is meant to describe.
+    let state = started(undefined, found.seed)
+    const observedByTurn = new Map<number, boolean>([[1, state.colony.environment.dustStorm]])
+    for (let turn = 1; turn <= found.storm.endTurn; turn++) {
+      state = asRunning(endCycle(state))
+      observedByTurn.set(turn + 1, state.colony.environment.dustStorm)
+    }
+
+    for (let turn = 1; turn <= found.storm.endTurn + 1; turn++) {
+      const expected = turn >= found.storm.startTurn && turn <= found.storm.endTurn
+      expect(observedByTurn.get(turn)).toBe(expected)
+    }
+    // Non-vacuous: the storm genuinely happened somewhere in what was observed.
+    expect([...observedByTurn.values()]).toContain(true)
   })
 })
 

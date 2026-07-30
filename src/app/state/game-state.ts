@@ -26,6 +26,9 @@
  *   - the colony comes from `colony-start.buildColony`
  *   - a turn comes from `turn.resolveTurn`
  *   - a build/cancel order comes from `orders.applyOrders`
+ *   - the dust-storm timeline, and each turn's `dustStorm` flag, come from
+ *     `weather.generateStormTimeline`/`weather.advanceWeather` (aic-oby.3) — see
+ *     `beginMission` and `advanceCycle` below
  * ============================================================================
  *
  * ============================================================================
@@ -95,9 +98,11 @@ import type {
 import type { MissionConfig } from '../../sim/mission'
 import { applyOrders } from '../../sim/orders'
 import type { OrderOutcome, PlayerOrder } from '../../sim/orders'
-import { DEFAULT_TURN_CYCLE } from '../../sim/time'
+import { DEFAULT_TURN_CYCLE, totalTurns } from '../../sim/time'
 import { resolveTurn } from '../../sim/turn'
 import type { ColonyState, CycleReport } from '../../sim/turn'
+import { advanceWeather, generateStormTimeline } from '../../sim/weather'
+import type { StormEvent } from '../../sim/weather'
 import { generateWorld } from '../../sim/world'
 import type { World } from '../../sim/world'
 
@@ -186,6 +191,16 @@ export interface RunningState {
   /** The scored landing this colony was built from, score and breakdown included. */
   readonly landing: ReadyLanding
   readonly colony: ColonyState
+  /**
+   * The mission's dust-storm timeline (aic-oby.3), generated ONCE at `begin-mission`
+   * from `seed` — the same "generate the schedule once" discipline `world` follows for
+   * terrain — and never regenerated. Each entry's `startTurn`/`endTurn` is directly
+   * observable, so a screen can announce an upcoming or ongoing storm without asking
+   * the sim anything further; `colony.environment.dustStorm` is this turn's already-
+   * REALIZED status, read off this same timeline by `advanceWeather` before every
+   * `resolveTurn` call below.
+   */
+  readonly weatherTimeline: readonly StormEvent[]
   /**
    * What the most recently RESOLVED turn actually did, or `null` before the first one.
    *
@@ -447,7 +462,16 @@ function beginMission(state: SurveyingState): GameState {
   if (state.readiness.status !== 'ready') return state
 
   const landing = state.readiness
-  const colony = buildColony({ world: state.world, landing, mission: state.mission })
+  const built = buildColony({ world: state.world, landing, mission: state.mission })
+
+  // Generated ONCE, from the session seed (aic-oby.3's "storms derive from the mission
+  // seed") and the mission's own total-turn count — never re-rolled, for the same
+  // reason the world above is generated exactly once at survey time.
+  const weatherTimeline = generateStormTimeline(state.seed, totalTurns(state.mission.turnCycle))
+  // Sets `colony.environment` for turn 1 BEFORE it is ever handed to `resolveTurn` —
+  // see `weather.ts`'s header on why this happens here, at the adapter, rather than
+  // inside `resolveTurn` itself.
+  const colony = advanceWeather(built, weatherTimeline)
 
   return {
     phase: 'running',
@@ -456,6 +480,7 @@ function beginMission(state: SurveyingState): GameState {
     world: state.world,
     landing,
     colony,
+    weatherTimeline,
     lastReport: null,
     outlook: resolveTurn(colony).report,
     orderOutcomes: [],
@@ -532,12 +557,18 @@ function advanceCycle(state: RunningState, afterTurnsTaken: number): RunningStat
   if (state.outlook === null) return state
   if (afterTurnsTaken !== state.colony.turnsTaken) return state
 
+  // `state.colony.environment` was already set for THIS turn — either by `beginMission`
+  // (turn 1) or by the previous call's own `advanceWeather` below (every turn since) —
+  // so the real resolve reads it as-is, exactly as `resolveTurn`'s own contract expects.
   const resolved = resolveTurn(state.colony)
+  // Pre-set the NEXT turn's environment before it is stored or forecast — see
+  // `weather.ts`'s header on why this happens here rather than inside `resolveTurn`.
+  const nextColony = advanceWeather(resolved.state, state.weatherTimeline)
   return {
     ...state,
-    colony: resolved.state,
+    colony: nextColony,
     lastReport: resolved.report,
-    outlook: hasConcluded(resolved.report) ? null : resolveTurn(resolved.state).report,
+    outlook: hasConcluded(resolved.report) ? null : resolveTurn(nextColony).report,
     // The turn they were issued for is over. See `RunningState.orderOutcomes`.
     orderOutcomes: [],
   }
