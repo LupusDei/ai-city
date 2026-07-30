@@ -123,16 +123,32 @@ test.describe('US1 — launch and survey', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('US2 — the landing choice is consequential', () => {
-  test('AC-2.1 selecting a site shows a score and all three components', async ({ page }) => {
+  test('AC-2.1 a complete landing shows a numeric score and all three components', async ({
+    page,
+  }) => {
+    // CORRECTED after the survey-screen agent pointed out this test was weaker than it
+    // read. It originally clicked ONE candidate and asserted the four readouts were
+    // not-empty. But `evaluateLanding` cannot score a single anchor — one hull is
+    // `incomplete` and carries no `ScoreBreakdown`, correctly, because all three
+    // components are properties of the PAIR (buildability across both footprints,
+    // proximity averaged over both anchors, separation between them). So after one click
+    // the honest render is a placeholder, which satisfied `not.toBeEmpty()` while proving
+    // nothing. The only way to have passed the old test with real numbers would have been
+    // for a component to invent a score the sim never produced.
+    //
+    // Now it places BOTH hulls and requires the score to contain a digit. Asserting a
+    // digit rather than mere non-emptiness is what stops a placeholder satisfying it.
     await openSurvey(page)
-    await page.locator(`[data-testid^="${ID.candidateSite}"]`).first().click()
+    const candidates = page.locator(`[data-testid^="${ID.candidateSite}"]:not([disabled])`)
+    await candidates.nth(0).click()
+    await candidates.nth(1).click()
     for (const id of [
       ID.siteScore,
       ID.scoreBuildability,
       ID.scoreDepositProximity,
       ID.scoreHullSeparation,
     ]) {
-      await expect(page.locator(at(id))).not.toBeEmpty()
+      await expect(page.locator(at(id))).toContainText(/\d/)
     }
   })
 

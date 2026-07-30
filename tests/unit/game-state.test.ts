@@ -633,3 +633,73 @@ describe('dispatch(unknown action)', () => {
     )
   })
 })
+
+describe('clear-selection (re-plot the landing)', () => {
+  // Added after the survey screen reported that the opening decision was one-shot: once
+  // both hulls were committed the only remaining transition was begin-mission, and the
+  // only escape was a reload that could hand back a DIFFERENT world, because a generated
+  // seed was never written to the URL. The escape hatch destroyed the thing being decided.
+  const REPLOT_SEED = 20260730
+
+  function withTwoHulls(): SurveyingState {
+    let s = beginSurvey({ seed: REPLOT_SEED, dimension: 24 })
+    const anchors: Coord[] = []
+    for (let y = 0; y < 20 && anchors.length < 2; y += 4) {
+      for (let x = 0; x < 20 && anchors.length < 2; x += 4) anchors.push({ x, y })
+    }
+    for (const a of anchors) s = dispatch(s, { kind: 'select-site', anchor: a }) as SurveyingState
+    return s
+  }
+
+  it('should clear both hull anchors', () => {
+    const cleared = dispatch(withTwoHulls(), { kind: 'clear-selection' }) as SurveyingState
+    expect(cleared.selection.droneHullAnchor).toBeNull()
+    expect(cleared.selection.reactorHullAnchor).toBeNull()
+  })
+
+  it('should keep the SAME world object, never a regenerated one', () => {
+    // The load-bearing assertion. A re-roll from the same seed is deep-equal and looks
+    // identical on screen, so only object identity distinguishes "survey this map again"
+    // from "silently give the player a different map" — the aic-c1p defect reproduced
+    // inside the adapter.
+    const before = withTwoHulls()
+    const cleared = dispatch(before, { kind: 'clear-selection' }) as SurveyingState
+    expect(cleared.world).toBe(before.world)
+    expect(cleared.world.grid).toBe(before.world.grid)
+    expect(cleared.seed).toBe(before.seed)
+  })
+
+  it('should restore the opening readiness verdict from the sim', () => {
+    const opening = beginSurvey({ seed: REPLOT_SEED, dimension: 24 })
+    const cleared = dispatch(withTwoHulls(), { kind: 'clear-selection' }) as SurveyingState
+    expect(cleared.readiness.status).toBe(opening.readiness.status)
+    expect(cleared.rejection).toBeNull()
+  })
+
+  it('should allow a different pair to be chosen afterwards, producing a different score', () => {
+    // Proves the reset is functional and not merely cosmetic: the player can actually
+    // re-decide, which is the entire reason the action exists.
+    const first = withTwoHulls()
+    const cleared = dispatch(first, { kind: 'clear-selection' }) as SurveyingState
+    const redone = dispatch(dispatch(cleared, { kind: 'select-site', anchor: { x: 0, y: 0 } }), {
+      kind: 'select-site',
+      anchor: { x: 12, y: 12 },
+    }) as SurveyingState
+    expect(redone.selection.droneHullAnchor).toEqual({ x: 0, y: 0 })
+    expect(redone.selection.reactorHullAnchor).toEqual({ x: 12, y: 12 })
+  })
+
+  it('should be inert while running, like every other inapplicable intent', () => {
+    let s: GameState = withTwoHulls()
+    s = dispatch(s, { kind: 'begin-mission' })
+    expect(s.phase).toBe('running')
+    expect(dispatch(s, { kind: 'clear-selection' })).toBe(s)
+  })
+
+  it('should be a no-op on an untouched survey rather than throwing', () => {
+    const opening = beginSurvey({ seed: REPLOT_SEED, dimension: 24 })
+    const cleared = dispatch(opening, { kind: 'clear-selection' }) as SurveyingState
+    expect(cleared.selection).toEqual(opening.selection)
+    expect(cleared.world).toBe(opening.world)
+  })
+})

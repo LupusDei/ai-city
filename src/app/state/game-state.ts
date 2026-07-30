@@ -257,6 +257,29 @@ export interface SelectSiteAction {
   readonly anchor: Coord
 }
 
+/**
+ * Discard both hull anchors and survey the SAME world again.
+ *
+ * Added after the survey screen reported (correctly) that the opening decision was
+ * one-shot and irreversible: `selectSite` fills the drone hull then the reactor hull, and
+ * once both are committed the only remaining transition is `begin-mission`. A player who
+ * places two hulls, reads a score of 48.1 and wants to try a different pair had exactly
+ * one escape: reload.
+ *
+ * And reload was worse than nothing. `resolveSeed` only writes a seed into the URL when
+ * the PLAYER supplied one, so a player who arrived at `/` and surveyed a generated world
+ * would get a DIFFERENT world on reload. The escape hatch silently destroyed the thing
+ * being decided about — reload was a reroll, not a retry.
+ *
+ * CRITICAL: this resets `selection`, `readiness` and `rejection` to their opening values
+ * and keeps `world` BY REFERENCE. Regenerating the world here — even from the same seed —
+ * would be the aic-c1p defect reproduced inside the adapter: deep-equal, visually
+ * identical, and quietly not the world the player was looking at. A test pins the identity.
+ */
+export interface ClearSelectionAction {
+  readonly kind: 'clear-selection'
+}
+
 /** Turn the scored landing into a running colony. Refused unless the landing is ready. */
 export interface BeginMissionAction {
   readonly kind: 'begin-mission'
@@ -285,6 +308,7 @@ export interface EndCycleAction {
 /** Every intent the UI can dispatch. Extend this union as new player actions are added. */
 export type GameAction =
   | SelectSiteAction
+  | ClearSelectionAction
   | BeginMissionAction
   | IssueOrdersAction
   | EndCycleAction
@@ -543,10 +567,32 @@ function advanceCycle(state: RunningState, afterTurnsTaken: number): RunningStat
  *   site, an occupied anchor, a cancelled build that no longer exists, an intent that does
  *   not apply) is typed data on the returned state, never an exception.
  */
+/**
+ * Reset both hull anchors, keeping the SAME world object.
+ *
+ * `world` is passed through by reference, not regenerated. That is the whole point: a
+ * re-roll from the same seed is deep-equal and visually identical, so nothing on screen
+ * would reveal that the player is now surveying a different world than the one they were
+ * comparing scores on. `readiness` is recomputed from the sim rather than cached from
+ * `beginSurvey`, so the opening "nothing placed yet" verdict still comes from
+ * `evaluateLandingOn` in every phase of the decision.
+ */
+function clearSelection(state: SurveyingState): SurveyingState {
+  const selection: LandingSelection = { droneHullAnchor: null, reactorHullAnchor: null }
+  return {
+    ...state,
+    selection,
+    readiness: evaluateLandingOn(state.world, selection),
+    rejection: null,
+  }
+}
+
 export function dispatch(state: GameState, action: GameAction): GameState {
   switch (action.kind) {
     case 'select-site':
       return state.phase === 'surveying' ? selectSite(state, action.anchor) : state
+    case 'clear-selection':
+      return state.phase === 'surveying' ? clearSelection(state) : state
     case 'begin-mission':
       return state.phase === 'surveying' ? beginMission(state) : state
     case 'issue-orders':
