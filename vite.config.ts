@@ -19,11 +19,22 @@ export default defineConfig({
     // whatever else is listening. Failing to start is far better than testing the
     // wrong server.
     strictPort: true,
+    // Vite rejects requests whose Host header it does not recognise — a deliberate
+    // DNS-rebinding protection. Serving the build through the shared ngrok tunnel means
+    // the Host arrives as the tunnel's domain, not localhost, so it must be named here
+    // or every request 403s with a blank page. Listed explicitly rather than disabling
+    // the check: `allowedHosts: true` would accept ANY host and give up the protection
+    // entirely, which is not a trade worth making to save one line.
+    allowedHosts: ['c4.jmm.ngrok.io'],
   },
 
   preview: {
     port: 5173,
     strictPort: true,
+    // Same reasoning as `server.allowedHosts` above. `vite preview` serves the real
+    // production bundle, which is what should be exposed over a tunnel — dev-mode HMR
+    // holds a websocket that is far less reliable across one.
+    allowedHosts: ['c4.jmm.ngrok.io'],
   },
 
   build: {
