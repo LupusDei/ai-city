@@ -1,74 +1,128 @@
-# AI City
+# AI City — Mars Colony
 
-A **web-based city-building game** — a modern recreation of the original **SimCity**.
+A **web-based, turn-based colony-building game**. SimCity's DNA, relocated to Mars and
+put on a clock.
 
-You found and grow a city on a square grid: provide **housing** and **infrastructure**
-(**water**, **food**) to support your residents, and the **population grows or shrinks**
-along a curve driven by how well those needs are met.
+Three starships left Earth. **Two landed.** The third — carrying critical components
+*and the personnel* — was **lost in transit**. What survived: one ship of **automated
+construction drones**, one ship of **nuclear reactors**.
 
-## MVP scope (locked)
+You have **two years** to build a habitat capable of receiving the next wave of
+colonists. There is nobody on the surface to help you. Only the drones.
+
+---
+
+## MVP scope
 
 The first playable target, deliberately small:
 
-- **Square grid** city map.
-- **Population: 1–20 people** to start.
-- **Three needs:** **water**, **food**, **housing**.
-- **Player goal:** place **housing** and **infrastructure** to supply those needs.
-- **Population growth curve:** population rises when needs are met, stalls/declines when
-  they're unmet — the core feedback loop.
-- **Web-based**, JavaScript framework (React / React Native, or similar — see Tech below).
+- **Square grid** Martian surface.
+- **Landing site selection** — the player's opening move: map the surface, then choose
+  where the two surviving ships set down.
+- **Drone-driven construction** — you don't place finished buildings, you *queue* them,
+  and drones build over multiple turns. **Build time is the scarce currency.**
+- **Electricity as the single binding constraint**, supplied by the surviving reactors.
+- **Structures of varying footprint** — from single tiles to larger multi-tile shapes,
+  all grid-aligned.
+- **Turn-based, against a hard 577-day deadline** — see the mission clock below.
+- **Win condition:** habitat capacity sufficient for the arriving colonist wave, evaluated
+  at the deadline.
 
-Everything past this (power, roads, zoning depth, traffic, economy, disasters, larger
-maps) is **post-MVP** and lives in the backlog, not the first build.
+### The mission clock (locked, reality-grounded)
+
+| Quantity | Value | Where it comes from |
+|---|---|---|
+| Mars sol | 24 h 39 m 35 s | The actual Martian solar day |
+| Drone shift | 25 h work + 1 sol recharge | The General's directive |
+| **One turn** | **49.66 h = 2.014 sols** | Work + recharge — the turn *is* the duty cycle |
+| **Mission length** | **577 days = 278 turns** | Synodic period 779.9 d − Starship transit 203 d |
+| Reactor output | 40 kWe per unit | NASA Fission Surface Power target unit |
+| Drone recharge draw | **5.54 kW** | 125 kWh usable ÷ 0.92 charging efficiency, + 32 W pack thermal upkeep, over one sol |
+
+The deadline is the moment the next wave **departs Earth**, not when it arrives — they will
+not commit to launch unless the habitat is confirmed ready. **Numbers must stay defensible
+against real mission engineering**; every default cites its basis in a code comment.
+
+Because drones recharge on **colony power**, the reactor budget caps how many drones can be
+on shift. Power and labour are a single constraint — that coupling is the core tension.
+
+### Deliberately deferred (post-MVP backlog)
+
+Additional resource constraints — **silica** (solar panels, habitat glass), **oxygen**,
+**hydrogen**, **carbon**, **metals** — plus a **credit system** for urgent Earth resupply
+missions. The resource ledger is built resource-agnostic *specifically* so these drop in
+as **data**, not as a rewrite. Do not build them until the core loop is fun.
+
+---
 
 ## Core loop (MVP)
 
-1. Player places housing + infrastructure (water/food sources) on the grid.
-2. Each tick, the sim computes **supply vs. demand** for water, food, housing.
-3. The **needs-met ratio** feeds the **growth curve**: met → population grows toward the
-   housing cap; unmet → growth stalls, then residents leave.
-4. Player reads the city's state, expands supply, and grows the population. Repeat.
+1. Survey the surface; choose landing sites for the two surviving ships.
+2. Queue structures; drones execute the builds over subsequent turns.
+3. Each turn resolves: construction progresses, the resource ledger nets production
+   against consumption, the mission clock advances.
+4. **Electricity is the pressure.** Expand generation or your colony browns out.
+5. Race the clock to habitat readiness before the colonists arrive.
 
-*The growth curve tied to met/unmet needs is the heart of the game — get that satisfying
-first.*
+*The tension between build time, power budget, and the deadline is the heart of the game.*
 
-## Tech (to finalize in `/speckit.plan`)
+---
 
-- **Web-based, JavaScript.** The General named **React Native or a similar JS framework**.
-  For a grid-sim rendered every tick, the conventional fit is **React for UI/shell +
-  a Canvas/WebGL layer** (plain Canvas, PixiJS, or similar) for the grid — React alone
-  re-rendering a large grid per tick is a perf trap. **React-Native-for-Web** is viable if
-  a shared mobile target matters; otherwise plain React + Canvas is simpler. **Confirm the
-  exact stack in the plan phase** (this is a tech choice, not a blocker).
-- **Simulation core is plain, framework-agnostic TypeScript** — deterministic tick loop,
-  fully testable, no rendering dependency. The renderer only *reads* sim state.
+## Status & open decisions
 
-## Architecture sketch (refine in docs/outline.md + /speckit.plan)
+**Confirmed by the General:** Mars premise, square grid, drones, electricity-first,
+varying structure footprints, turn-based with a 2-year limit.
 
-- **Simulation core** — deterministic tick loop; authoritative city + population state.
-  Supply/demand for water/food/housing → needs-met ratio → growth curve. Pure TS, tested.
-- **World / grid model** — square grid of tiles; buildings (housing, water, food sources)
-  as data-driven types with supply/coverage rules.
-- **Population model** — residents (or aggregate cohorts at this scale) with the three
-  needs; the growth-curve function is a first-class, tunable, tested unit.
-- **Renderer & UI (React + Canvas/WebGL)** — grid view, placement tools, city readouts
-  (population, need coverage). Reads sim state; owns no game logic.
-- **Persistence** — deterministic save/load of the grid + population state.
-- **Content/config** — building types, need rates, growth-curve tunables as **data**.
+**Ratified** (proposal `55009338` accepted; all three confirmed):
 
-## Non-negotiables
+| Decision | Ruling |
+|---|---|
+| Is the colony unmanned until the wave arrives? | **Yes** — no humans, no population sim in MVP |
+| What is one turn? | **One drone duty cycle** — 25 h work + 1 sol recharge |
+| Mission length | **577 days = 278 turns** |
+| Does recharging draw colony power? | **Yes** — power and labour are one constraint |
+| What makes a landing site good? | Terrain buildability, deposit proximity, hull separation |
 
-- **Ship the MVP loop first** — grid + housing + water/food + the growth curve. Resist
-  scope creep (power/roads/economy/etc. are backlog until the loop is fun).
-- **Simulation core is the product** — deterministic, testable, decoupled from React.
-  **Do not put game logic in components.**
-- **The growth curve is data-driven and unit-tested** — it's the balance knob.
-- Follow the constitution + testing rules installed by `adjutant init` (TDD; sim logic and
-  the growth curve have tests; determinism is regression-tested).
+> **Superseded:** an earlier draft of this project specified a SimCity MVP with
+> water/food/housing needs and a population growth curve. The Mars brief replaced it.
+> That model is **retired** — the crew ship was lost, so there is no population to grow
+> during the MVP. Do not resurrect it from old notes.
 
-## Status
+---
 
-Bootstrapped and adjutant-initialized; ready for an agent to begin planning + building.
-See `docs/outline.md` for the epic/task outline. First move: `/speckit.specify` the MVP
-above → `/speckit.plan` (lock the exact React/Canvas stack) → `/speckit.tasks` →
-`/speckit.beads` (`aic-*`).
+## Architecture
+
+- **Simulation core** (`src/sim`) — **the product.** Framework-agnostic, deterministic,
+  turn-based TypeScript. Grid, structure catalog, placement, resource ledger, construction,
+  power, mission clock. Zero rendering dependency.
+- **Renderer & UI** — React for shell/HUD + a **Canvas** layer for the grid. Reads sim
+  state and dispatches player intents; **owns no game logic**.
+- **Content/config** — structure types, build durations, power values, and the deadline
+  are **data**, never literals in code.
+
+### Non-negotiables
+
+- **The simulation core is the product** — deterministic, testable, React-decoupled.
+  **No game logic in components.**
+- **Determinism is a tested property**, not an aspiration: identical state + identical
+  turns must yield identical output. Guarded by a golden-trace regression test.
+- **Resources are data-driven.** Adding silica or oxygen must not require touching
+  ledger logic.
+- **Ship the MVP loop first.** Backlog everything else until it's fun.
+
+---
+
+## Build & test
+
+```bash
+npm install
+npm run verify        # typecheck + build + tests with coverage gates
+npm test              # tests only
+npm run test:coverage # coverage gates: 80% lines / 70% branches / 60% functions
+```
+
+TypeScript **strict** mode (plus `noUncheckedIndexedAccess`). Coverage thresholds are
+**blocking** — verified by negative control, not assumed.
+
+Work is tracked in **beads** (`aic-*`): `bd ready` to find available work.
+See `docs/outline.md` for the epic breakdown.

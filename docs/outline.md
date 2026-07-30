@@ -1,77 +1,80 @@
-# AI City — Project Outline
+# AI City — Epic Outline
 
-Starting outline for the agent picking up the project. Treat it as a proposal, not
-gospel — refine via `/speckit.specify` + `/speckit.plan` and wire beads (`aic-*`) before
-building.
+> **Revised 2026-07-29** for the Mars colonization brief. The original SimCity outline
+> (water/food/housing needs + population growth curve) is **superseded** — see the
+> "Retired" section at the bottom before resurrecting anything from git history.
+
+The authoritative task list is **beads** (`aic-*`). Run `bd ready`. This document explains
+the *shape* of the plan; the beads carry the acceptance criteria.
 
 ## Vision (one line)
 
-**AI City** — a web-based recreation of the original **SimCity**. MVP: a square-grid city
-with **1–20 residents** and three needs (**water, food, housing**); the player places
-housing + infrastructure to meet those needs, and **population grows or declines along a
-curve** driven by needs met vs. unmet.
+**AI City** — a turn-based Mars colony builder. Two of three starships land; the one
+carrying the personnel is lost. Using **drones** and **nuclear reactors**, build a habitat
+ready for the next colonist wave **within two years**.
 
-## MVP scope (locked by the General)
+---
 
-- Square grid map.
-- Population 1–20 to start.
-- Needs: **water, food, housing**.
-- Goal: supply those needs via housing + infrastructure placement.
-- **Population growth curve** keyed to the needs-met ratio (the core loop).
-- Web-based, JS framework (React / React Native or similar).
+## Why the epics are ordered this way
 
-Out of MVP scope (backlog): power, roads/traffic, zoning depth, economy/taxes, pollution,
-disasters, larger maps, save-to-cloud. **Do not build these until the MVP loop is fun.**
+The single highest-risk property of this project is **determinism** — a colony sim whose
+turns aren't reproducible cannot be balanced, saved, or debugged. So the sim core is built
+and proven in tests *before* anything is drawn. Rendering is downstream of a sim that
+already works.
 
-## Decisions to finalize in the plan phase (not blockers)
+### Epic 1 — Foundation & toolchain — `aic-093` ✅ *scaffold complete*
+Strict TypeScript, Vitest, blocking coverage gates (80/70/60), and an enforced
+sim-core/renderer boundary. Exists so every later bead can be built test-first.
 
-1. **Exact web stack.** React + Canvas/WebGL (PixiJS or plain Canvas) vs.
-   React-Native-for-Web. Recommend React + Canvas for a per-tick grid unless a shared
-   mobile target matters. Sim core stays framework-agnostic TS regardless.
-2. **Population representation at 1–20.** Individual resident entities (simple, inspectable)
-   vs. an aggregate cohort. Individuals are fine at this scale and read better.
-3. **Growth-curve shape.** The met/unmet → growth function + its tunables; design it as a
-   first-class, unit-tested unit.
+### Epic 6 — Martian surface & landing site selection — `aic-74p`
+Seeded terrain generation (identical seed → identical map), tile buildability, and
+resource deposits. Then the player's opening move: choosing where the two surviving ships
+set down. **Landing choice must be consequential**, or the phase is cosmetic.
 
-## Proposed Epics (rough order)
+### Epic 2 — Simulation core (deterministic, turn-based) — `aic-a00` ← *the product*
+- `.1` **Grid & coordinate model** ✅ *done* — row-major tiles, bounds, occupancy
+- `.2` **Structure catalog** — types as data: footprint, power, build cost/duration
+- `.3` **Placement & multi-tile footprint validation** — typed rejections, never throws
+- `.4` **Resource ledger** — production vs consumption; electricity now, silica/O₂/H₂/
+  carbon/metals later *as data*
+- `.8` **Drone construction** — builds consume turns; build time is the scarce currency
+- `.9` **Power generation & distribution** — the binding constraint + the brownout rule
+- `.10` **Mission clock & win condition** — habitat capacity vs the 2-year deadline
+- `.6` **Deterministic turn resolution** — the authoritative `state → state` step
+- `.7` **Golden-trace regression** — proves determinism can't silently rot
 
-### Epic 1 — Simulation core (deterministic)
-Tick loop; authoritative city + population state. Supply/demand for water/food/housing →
-needs-met ratio → growth curve. Pure TS, fully tested, no rendering dependency.
-*Includes the growth-curve function as a first-class, tested unit — it is the balance knob.*
+### Epic 3 — Renderer & UI — `aic-8tl`
+React shell/HUD + Canvas grid layer. Reads sim state, dispatches intents, **owns no game
+logic**. Needs a turn fast-forward affordance if one turn = one sol.
 
-### Epic 2 — Grid & building model
-Square grid of tiles. Building types (housing, water source, food source) as data-driven
-config with supply/coverage rules. Placement validity + occupancy.
+### Epic 4 — Core loop & balance — `aic-to6`
+Tune build durations, power values, and the deadline so the race feels tight. All tunables
+are data.
 
-### Epic 3 — Population & needs
-Residents (individual entities at 1–20 scale) with water/food/housing needs. Aggregate
-need coverage → the growth curve. Move-in / move-out driven by met vs. unmet needs.
+### Epic 5 — Persistence & polish — `aic-n3q`
+Deterministic save/load, perf budget, deploy. *Then* re-open the backlog (silica, oxygen,
+hydrogen, carbon, metals, Earth-resupply credits).
 
-### Epic 4 — Renderer & UI (React + Canvas/WebGL)
-Grid view, placement tools, and readouts (population, per-need coverage, growth trend).
-Reads sim state; owns no game logic. Every state designed (empty/paused/over-capacity).
+---
 
-### Epic 5 — Core game loop & balance
-Wire placement → simulation → growth into a satisfying minute-to-minute loop. Tune the
-growth curve + need rates so meeting needs feels rewarding and neglect has consequences.
+## Working defaults (confirm via filed questions)
 
-### Epic 6 — Persistence & polish
-Deterministic save/load of grid + population. Onboarding, perf budget for the grid,
-build/deploy pipeline. Then re-open the backlog (power/roads/economy) for v2.
-
-## First moves for the agent
-
-1. Read this outline + README (MVP is locked; the concept is settled).
-2. `/speckit.specify` the MVP, then `/speckit.plan` — **lock the exact React/Canvas stack**
-   and the sim-core/renderer boundary — then `/speckit.tasks` + `/speckit.beads` → `aic-*`.
-3. Build **Epic 1 first** (deterministic sim core + growth curve, TDD) before any
-   rendering — the loop must be provable in tests before it's drawn.
-4. Claim work with `bd`; follow the constitution + testing rules from `adjutant init`.
+- **Colony is unmanned** until the wave arrives — no population sim in MVP.
+- **1 turn = 1 sol**, ~670-turn budget, with UI fast-forward.
+- **Landing sites differ by** terrain buildability, deposit proximity, ship separation.
 
 ## Non-negotiables
 
-- **Ship the MVP loop first**; backlog everything else.
-- **Simulation core is the product** — deterministic, testable, React-decoupled. No game
-  logic in components.
-- **Growth curve is data-driven and unit-tested.**
+- **Sim core is the product** — deterministic, testable, React-decoupled.
+- **Determinism is tested**, via golden trace. No `Date.now()`, no unseeded `Math.random()`.
+- **Resources and structures are data**, not code branches.
+- **Ship the MVP loop first.**
+
+---
+
+## Retired (do not rebuild)
+
+The pre-pivot outline specified: population 1–20, needs of **water/food/housing**, and a
+**population growth curve** driven by a needs-met ratio. All of it is retired. The crew
+ship was lost in transit, so the MVP colony has **no humans** — the goal function is
+habitat *readiness*, not population growth. Bead `aic-a00.5` is closed as superseded.

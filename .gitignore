@@ -10,3 +10,6 @@ dist/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Test coverage output
+coverage/

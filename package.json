@@ -1,0 +1,21 @@
+{
+  "name": "ai-city",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A web-based city-building game — a modern recreation of the original SimCity.",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "verify": "npm run typecheck && npm run build && npm run test:coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.10"
+  }
+}
