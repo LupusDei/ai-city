@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AI City — Resource Chain 1 of 3: Break Ground (Regolith → Sinter → Shielded Habitat)</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  /* DARK token set — the default. AA contrast against the dark surfaces below. */
+  .proposal-root {
+    --page-bg: #0d1117;
+    --doc-bg: #161b22;
+    --doc-border: #30363d;
+    --text: #e6edf3;
+    --heading: #f0f6fc;
+    --muted: #9da7b3;
+    --rule: #30363d;
+    --link: #79c0ff;
+    --code-bg: #1f2630;
+    --code-text: #e6edf3;
+    --pre-bg: #010409;
+    --pre-text: #e6edf3;
+    --quote-text: #b3bcc7;
+    --th-bg: #1f2630;
+    --toggle-bg: #21262d;
+    --toggle-border: #30363d;
+    --toggle-text: #e6edf3;
+    --focus: #79c0ff;
+  }
+
+  /* LIGHT token set — applied when the OS prefers light, OR (below) when toggled. */
+  @media (prefers-color-scheme: light) {
+    .proposal-root {
+      --page-bg: #f6f8fa;
+      --doc-bg: #ffffff;
+      --doc-border: #d0d7de;
+      --text: #1f2328;
+      --heading: #11161c;
+      --muted: #57606a;
+      --rule: #eaecef;
+      --link: #0969da;
+      --code-bg: #eff1f3;
+      --code-text: #1f2328;
+      --pre-bg: #1f2328;
+      --pre-text: #f6f8fa;
+      --quote-text: #57606a;
+      --th-bg: #f6f8fa;
+      --toggle-bg: #ffffff;
+      --toggle-border: #d0d7de;
+      --toggle-text: #1f2328;
+      --focus: #0969da;
+    }
+  }
+
+  /* Manual override: checking the toggle forces the LIGHT token set regardless of OS.
+     Authored last + sibling-scoped so the explicit user choice beats the media query. */
+  .proposal-doc__theme-input:checked ~ .proposal-root {
+    --page-bg: #f6f8fa;
+    --doc-bg: #ffffff;
+    --doc-border: #d0d7de;
+    --text: #1f2328;
+    --heading: #11161c;
+    --muted: #57606a;
+    --rule: #eaecef;
+    --link: #0969da;
+    --code-bg: #eff1f3;
+    --code-text: #1f2328;
+    --pre-bg: #1f2328;
+    --pre-text: #f6f8fa;
+    --quote-text: #57606a;
+    --th-bg: #f6f8fa;
+    --toggle-bg: #ffffff;
+    --toggle-border: #d0d7de;
+    --toggle-text: #1f2328;
+    --focus: #0969da;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-text-size-adjust: 100%;
+  }
+  .proposal-root {
+    min-height: 100vh;
+    background: var(--page-bg);
+    color: var(--text);
+  }
+
+  /* The hidden checkbox driving the CSS-only toggle. Kept off-screen (not display:none)
+     so it stays reachable by keyboard/AT; the visible affordance is its <label>. */
+  .proposal-doc__theme-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .proposal-doc__theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--toggle-border);
+    border-radius: 999px;
+    background: var(--toggle-bg);
+    color: var(--toggle-text);
+  }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--light { display: none; }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--dark { display: inline; }
+  /* When toggled to light, show the ☀ affordance (and vice-versa). */
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--dark { display: none; }
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--light { display: inline; }
+  /* Visible focus ring for keyboard users (the toggle is the only interactive control). */
+  .proposal-doc__theme-input:focus-visible ~ .proposal-root .proposal-doc__theme-toggle,
+  .proposal-doc__theme-toggle:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .proposal-doc {
+    max-width: 46rem;
+    margin: 2.5rem auto;
+    padding: 2.5rem 3rem;
+    background: var(--doc-bg);
+    border: 1px solid var(--doc-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(1, 4, 9, 0.4);
+  }
+  .proposal-doc h1, .proposal-doc h2, .proposal-doc h3,
+  .proposal-doc h4, .proposal-doc h5, .proposal-doc h6 {
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+    font-weight: 600;
+    color: var(--heading);
+  }
+  .proposal-doc h1 { font-size: 2rem; margin-top: 0; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc h2 { font-size: 1.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc p, .proposal-doc ul, .proposal-doc ol, .proposal-doc blockquote, .proposal-doc table {
+    margin: 0 0 1rem;
+  }
+  .proposal-doc a { color: var(--link); text-decoration: none; }
+  .proposal-doc a:hover { text-decoration: underline; }
+  .proposal-doc a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+  .proposal-doc code, .proposal-doc pre, .proposal-doc kbd, .proposal-doc samp {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .proposal-doc code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .proposal-doc pre {
+    background: var(--pre-bg);
+    color: var(--pre-text);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow: auto;
+  }
+  .proposal-doc pre code { background: transparent; padding: 0; color: inherit; }
+  .proposal-doc blockquote {
+    margin-left: 0;
+    padding: 0.2em 1rem;
+    color: var(--quote-text);
+    border-left: 0.25em solid var(--doc-border);
+  }
+  .proposal-doc table { border-collapse: collapse; width: 100%; }
+  .proposal-doc th, .proposal-doc td { border: 1px solid var(--doc-border); padding: 0.5em 0.75em; text-align: left; }
+  .proposal-doc th { background: var(--th-bg); font-weight: 600; }
+  .proposal-doc img, .proposal-doc svg { max-width: 100%; height: auto; }
+  .proposal-doc hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .proposal-doc__header { margin-bottom: 1.5rem; }
+  .proposal-doc__title { font-size: 2rem; font-weight: 600; margin: 0; color: var(--heading); }
+  .proposal-doc__meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .proposal-doc__theme-toggle { transition: background 0.15s ease, color 0.15s ease; }
+  }
+</style>
+</head>
+<body>
+<input type="checkbox" id="proposal-theme-toggle" class="proposal-doc__theme-input" aria-label="Toggle light or dark theme">
+<div class="proposal-root">
+<label for="proposal-theme-toggle" class="proposal-doc__theme-toggle">
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--dark" aria-hidden="true">☾</span>
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--light" aria-hidden="true">☀</span>
+<span>Theme</span>
+</label>
+<main class="proposal-doc">
+<header class="proposal-doc__header">
+<h1 class="proposal-doc__title">AI City — Resource Chain 1 of 3: Break Ground (Regolith → Sinter → Shielded Habitat)</h1>
+<div class="proposal-doc__meta">product proposal</div>
+</header>
+<article>
+<style>
+  :root {
+    --bg:#17120F; --surface:#211A16; --surface-2:#2B221C;
+    --ink:#EFE5DB; --ink-soft:#B3A296; --rule:#3C3129;
+    --iron:#E88055; --inst:#79BDD8; --amber:#E3AB55; --good:#8CC182;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#F2EBE4; --surface:#FBF7F2; --surface-2:#E8DFD6;
+      --ink:#241C17; --ink-soft:#665950; --rule:#D9CDC2;
+      --iron:#A33C1B; --inst:#1B5E78; --amber:#8A5D0C; --good:#3D6B38;
+    }
+  }
+  .doc {
+    background:var(--bg); color:var(--ink);
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size:17px; line-height:1.65;
+    padding:2.5rem 1.5rem 4rem; margin:0;
+  }
+  .doc-inner { max-width:52rem; margin:0 auto; }
+  .doc h1, .doc h2, .doc h3 { line-height:1.15; text-wrap:balance; margin:0 0 .5rem; }
+  .doc h1 { font-size:2.4rem; letter-spacing:-.02em; }
+  .doc h2 {
+    font-size:1.55rem; letter-spacing:-.015em; margin-top:3rem;
+    padding-top:.9rem; border-top:2px solid var(--iron);
+  }
+  .doc h3 { font-size:1.15rem; margin-top:1.75rem; }
+  .doc p, .doc ul, .doc ol { margin:0 0 1rem; }
+  .doc a { color:var(--inst); }
+  .doc a:focus-visible, .doc :focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-soft); margin:0 0 .35rem;
+  }
+  .lede { font-size:1.22rem; line-height:1.5; color:var(--ink); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric:tabular-nums; }
+  .doc blockquote {
+    margin:1.5rem 0; padding:.15rem 0 .15rem 1.25rem;
+    border-left:3px solid var(--iron); color:var(--ink);
+  }
+  .doc blockquote.inst { border-left-color:var(--inst); }
+  .doc blockquote.amber { border-left-color:var(--amber); }
+  .figure { margin:1.75rem 0; }
+  .figure svg { display:block; width:100%; height:auto; background:var(--surface); border:1px solid var(--rule); }
+  .figcap {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.74rem; letter-spacing:.06em; color:var(--ink-soft);
+    margin-top:.5rem; line-height:1.5;
+  }
+  .table-wrap { overflow-x:auto; margin:1.25rem 0; }
+  .doc table { border-collapse:collapse; width:100%; font-size:.92rem; min-width:30rem; }
+  .doc th, .doc td { text-align:left; padding:.5rem .9rem .5rem 0; border-bottom:1px solid var(--rule); vertical-align:top; }
+  .doc th {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); font-weight:400;
+  }
+  .doc td.num { font-family: ui-monospace, Menlo, monospace; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stats { display:flex; flex-wrap:wrap; gap:1.5rem; margin:1.25rem 0; }
+  .stat { display:flex; flex-direction:column; }
+  .stat b {
+    font-family: ui-monospace, Menlo, monospace; font-size:1.7rem;
+    font-weight:600; letter-spacing:-.02em; line-height:1.15;
+  }
+  .stat span {
+    font-family: ui-monospace, Menlo, monospace; font-size:.7rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+  }
+  .c-iron { color:var(--iron); } .c-inst { color:var(--inst); } .c-good { color:var(--good); } .c-amber { color:var(--amber); }
+  .tag {
+    display:inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:.1rem .45rem; border:1px solid currentColor; white-space:nowrap;
+  }
+  .doc ul { padding-left:1.15rem; }
+  .doc li { margin-bottom:.5rem; }
+  .doc li::marker { color:var(--iron); }
+  .masthead { border-bottom:2px solid var(--ink); padding-bottom:1.5rem; margin-bottom:.5rem; }
+  .footer {
+    margin-top:3.5rem; padding-top:1rem; border-top:2px solid var(--ink);
+    font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between;
+  }
+  .s-panel { fill:var(--surface-2); }
+  .s-rule  { stroke:var(--rule); }
+  .s-ink   { fill:var(--ink); }
+  .s-soft  { fill:var(--ink-soft); }
+  .s-iron  { fill:var(--iron); }
+  .s-inst  { fill:var(--inst); }
+  .s-amber { fill:var(--amber); }
+  .s-good  { fill:var(--good); }
+  .s-lbl   { font-family: ui-monospace, Menlo, monospace; font-size:11px; letter-spacing:.08em; }
+  .s-lbl-sm{ font-family: ui-monospace, Menlo, monospace; font-size:9px; letter-spacing:.06em; }
+  .s-on-fill { fill:#17120F; }
+</style>
+
+<div class="doc"><div class="doc-inner">
+
+<div class="masthead">
+  <p class="eyebrow">Resource Chain Proposal 1 of 3 · Regolith</p>
+  <h1>Break Ground: a habitat nobody can live in isn’t a habitat</h1>
+  <p class="lede">Two structures and one upgrade — dig, sinter, bury. The point is not the
+  new resource. The point is that it lets the win condition stop lying: an unshielded pressurised
+  module contributes <strong>zero</strong> to habitat readiness, because on the Martian surface no
+  one would sign it off for occupancy. One Hopper and one Press make a module habitable in
+  <strong>7.5 turns</strong>.</p>
+</div>
+
+<p><span class="tag c-amber">Scope</span> &nbsp;This is a <strong>post-MVP-loop increment</strong>.
+The MVP’s job is to make the electricity-and-labour loop fun, and none of this ships before
+that loop is proven playable. Read this as the first thing to build <em>after</em> the core loop
+lands, not as a competitor for the same sprint.</p>
+
+<div class="stats">
+  <div class="stat"><b class="c-amber">0.64</b><span>mSv / day, unshielded</span></div>
+  <div class="stat"><b class="c-iron">4,500</b><span>kg / m² of shielding</span></div>
+  <div class="stat"><b class="c-iron">7.5</b><span>turns to shield one hab</span></div>
+  <div class="stat"><b class="c-inst">0</b><span>readiness, if unrated</span></div>
+</div>
+
+<h2>The thesis</h2>
+
+<p>The MVP win condition is habitat <em>capacity</em>: build modules, house colonists, beat the
+278-turn deadline. That condition currently rewards a bare pressure vessel. It shouldn’t.</p>
+
+<p>The RAD instrument on Curiosity measured the surface radiation environment directly at Gale
+Crater and found an average dose equivalent of about <strong>0.64 mSv/day</strong> — roughly
+<strong>230 mSv/year</strong>. That is not a hazard you engineer around with a thicker wall; it is
+a hazard you engineer around with mass. Every serious surface-habitat concept answers it the same
+way: put several metres of the local dirt on top of the module.</p>
+
+<blockquote class="amber">
+  <p>So the mechanic is a two-factor test. A habitat counts toward readiness only when it is
+  <strong>built AND rated</strong>. Rating requires a Shield Berm. Everything else in this proposal
+  exists to make a berm buildable — and cheap enough that zeroing out an unrated module is
+  fair rather than punitive.</p>
+</blockquote>
+
+<p>This is the right <em>first</em> chain for two reasons. It needs no exotic chemistry — only
+digging and heat, which is one utility and one furnace. And it makes the existing win condition
+harder rather than bolting a parallel scoring system onto the side of it. A chain whose output
+cannot be spent on anything the player already cares about is just a number that goes up.</p>
+
+<h3>One note on the tile scale, because every mass below depends on it</h3>
+
+<p>Every mass figure in this proposal is an areal quantity, so it hangs off the tile edge. I derived
+<strong>1 tile = 5 m (25 m²)</strong>, which makes a 2×2 habitat
+<strong>100 m²</strong> of roof to cover. That is <em>my recommendation, pending the
+General’s ratification.</em> If he picks a different edge, <strong>the shielding masses scale
+with the square of the tile edge</strong> — a 10 m tile would quadruple every tonnage and
+every turn count on this page. Nothing else in the chain moves: the Hopper and Press figures come
+from energy per kilogram, not from geometry.</p>
+
+<h2>The chain</h2>
+
+<div class="figure">
+<svg viewBox="0 0 900 380" role="img" aria-label="Flow diagram of the regolith chain: a Regolith Hopper drawing 12 kilowatts produces 60 tonnes of regolith per turn, shown as a wide band feeding bulk fill directly to the Shield Berm, while a much thinner branch of 1.4 tonnes per turn feeds the Sinter Press drawing 30 kilowatts, which yields 1.2 tonnes of sintered plate per turn for the berm crust. The berm needs 450 tonnes of fill plus 7.5 tonnes of plate and converts a habitat module into a rated habitat housing eight colonists. Together the Hopper and Press draw 42 kilowatts, 105 percent of one reactor, and a complete berm costs about 13,800 kilowatt-hours or 7 reactor-turns, delivered in 7.5 turns.">
+
+  
+  <polygon points="180,142 560,142 560,158 592,180 560,202 560,218 180,218" class="s-iron" opacity="0.26"></polygon>
+  <text x="368" y="176" text-anchor="middle" class="s-lbl s-ink">REGOLITH · BULK FILL</text>
+  <text x="368" y="196" text-anchor="middle" class="s-lbl-sm s-soft">60 t / TURN · NO DEPOSIT REQUIRED</text>
+
+  
+  <path d="M244,142 L252,142 L252,84 L288,84 L288,92 L302,80 L288,68 L288,76 L244,76 Z" class="s-amber"></path>
+  <text x="20" y="56" class="s-lbl-sm s-amber">60 t IN, 1.4 t USED — A 43× OVER-FEED</text>
+  <text x="260" y="112" class="s-lbl-sm s-amber">1.4 t / TURN</text>
+
+  
+  <rect x="20" y="140" width="160" height="80" class="s-panel s-rule" stroke-width="1.5"></rect>
+  <text x="100" y="172" text-anchor="middle" class="s-lbl s-ink">REGOLITH HOPPER</text>
+  <text x="100" y="192" text-anchor="middle" class="s-lbl-sm s-soft">1×1 · 2 TURNS</text>
+  <text x="100" y="242" text-anchor="middle" class="s-lbl-sm s-iron">12 kW · 30% OF ONE REACTOR</text>
+
+  
+  <rect x="302" y="40" width="160" height="80" class="s-panel s-rule" stroke-width="1.5"></rect>
+  <text x="382" y="74" text-anchor="middle" class="s-lbl s-ink">SINTER PRESS</text>
+  <text x="382" y="94" text-anchor="middle" class="s-lbl-sm s-soft">L-SHAPE, 3 TILES · 6 TURNS</text>
+  <text x="382" y="28" text-anchor="middle" class="s-lbl-sm s-iron">30 kW · 75% OF ONE REACTOR</text>
+
+  
+  <path d="M462,76 L640,76 L640,124 L650,124 L636,140 L622,124 L632,124 L632,84 L462,84 Z" class="s-inst"></path>
+  <text x="548" y="66" text-anchor="middle" class="s-lbl-sm s-inst">SINTERED PLATE 1.2 t / TURN</text>
+
+  
+  <rect x="594" y="140" width="158" height="80" class="s-panel s-rule" stroke-width="1.5"></rect>
+  <text x="673" y="172" text-anchor="middle" class="s-lbl s-ink">SHIELD BERM</text>
+  <text x="673" y="192" text-anchor="middle" class="s-lbl-sm s-soft">450 t FILL + 7.5 t PLATE</text>
+  <text x="673" y="242" text-anchor="middle" class="s-lbl-sm s-soft">NO POWER DRAW</text>
+
+  
+  <path d="M752,176 L780,176 L780,168 L794,180 L780,192 L780,184 L752,184 Z" class="s-good"></path>
+
+  
+  <rect x="798" y="140" width="84" height="80" class="s-panel s-rule" stroke-width="1.5"></rect>
+  <text x="840" y="170" text-anchor="middle" class="s-lbl s-good">RATED</text>
+  <text x="840" y="188" text-anchor="middle" class="s-lbl s-good">HABITAT</text>
+  <text x="840" y="208" text-anchor="middle" class="s-lbl-sm s-soft">8 PAX</text>
+
+  <line x1="20" y1="270" x2="882" y2="270" class="s-rule" stroke-width="1"></line>
+  <text x="20" y="296" class="s-lbl s-inst">ONE HOPPER + ONE PRESS = 42 kW = 105% OF ONE REACTOR</text>
+  <text x="20" y="318" class="s-lbl-sm s-soft">ONE COMPLETED BERM ≈ 13,800 kWh ≈ 7 REACTOR-TURNS · DELIVERED IN 7.5 TURNS</text>
+  <text x="20" y="348" class="s-lbl s-iron">DIGGING IS NEARLY FREE. HEAT IS RUINOUS.</text>
+</svg>
+<p class="figcap">Fig. A — The chain, drawn to make the asymmetry visible. The wide band is
+what one Hopper moves; the thin branch is all the Press can absorb. Band widths are schematic, not
+to scale — a true-scale thin branch would be under two pixels.</p>
+</div>
+
+<h3>1. Regolith Hopper — acquisition</h3>
+
+<p><span class="tag c-iron">1×1</span> <span class="tag">2 build turns</span>
+<span class="tag c-iron">12 kW · 30% of one reactor</span>
+<span class="tag c-good">+60 t regolith / turn</span></p>
+
+<p>At 12 kW over a 49.66-hour turn the Hopper spends <span class="mono">596 kWh</span>. Against
+60,000 kg of moved regolith that is <span class="mono">0.0099 kWh/kg</span>. That sits inside the
+measured specific-energy range for excavating and hauling loose regolith — roughly
+<span class="mono">0.01–0.05 kWh/kg</span> including traverse. The 60-tonne yield was derived
+backwards from that range against a power draw we wanted to be cheap; it is not a round number
+someone liked the look of.</p>
+
+<p><strong>It requires no deposit.</strong> Martian soil is roughly 45 wt% SiO₂ and 18 wt%
+iron oxide, per Curiosity’s APXS and CheMin soil measurements — and it is like that
+essentially everywhere. That is exactly why this is the beginner chain, and exactly why it must not
+be gated on a lucky landing site. A player who lands badly should still be able to shield a
+habitat; what a bad landing should cost them is the <em>other</em> two chains.</p>
+
+<h3>2. Sinter Press — assembly</h3>
+
+<p><span class="tag c-iron">L-shape, 3 tiles</span> <span class="tag">6 build turns</span>
+<span class="tag c-iron">30 kW · 75% of one reactor</span>
+<span class="tag c-inst">+1.2 t plate / turn</span></p>
+
+<p>The real process is microwave or thermal sintering of regolith to about
+<strong>1,100 °C</strong>, an actively researched ISRU technique precisely because it needs no
+imported binder. The thermodynamic floor is easy to bound: a specific heat near
+<span class="mono">0.8 kJ/kg·K</span> across a <span class="mono">1,100 K</span> rise is
+<span class="mono">880 kJ/kg = 0.244 kWh/kg</span>. Real furnaces are not reversible; at a
+realistic <strong>~20% process efficiency</strong> that becomes <span class="mono">~1.2
+kWh/kg</span>.</p>
+
+<blockquote class="inst">
+  <p><span class="mono">30 kW × 49.66 h = 1,490 kWh / turn</span><br>
+  <span class="mono">1,490 kWh ÷ 1.2 kWh/kg = ~1,240 kg</span><br>
+  → <strong>1.2 t of sintered plate per turn</strong>, consuming <strong>~1.4 t of
+  regolith</strong> once losses are allowed for.</p>
+</blockquote>
+
+<h3>The insight this chain exists to teach</h3>
+
+<p>One Hopper (60 t/turn) over-feeds one Press (1.4 t/turn) by more than <strong>40×</strong>.
+That is not a balance error I forgot to fix. It is the physics: <strong>digging is nearly free, heat
+is ruinous.</strong> Moving a kilogram of dirt costs ~0.01 kWh; raising it to 1,100 °C costs
+~1.2 kWh — two orders of magnitude more.</p>
+
+<p>The mechanical consequence is that <em>presses are the bottleneck and power is the currency</em>.
+The player’s question is never “how much dirt can I move” — one Hopper
+answers that forever. It is “how many presses can my reactors carry.” That is a good
+question for a city-builder to ask, because the answer is a build order.</p>
+
+<p>Worth noting for confidence in the model: this same shape — cheap acquisition, brutally
+expensive conversion — recurs independently in the other two chains in this series. I did not
+impose it. It fell out of the energetics three times. When a model produces the same qualitative
+answer from three unrelated sets of real numbers, the model is probably behaving.</p>
+
+<h3>3. Shield Berm — the structure that spends it</h3>
+
+<p>Meaningful attenuation of galactic cosmic rays wants roughly <strong>2–3 m of
+regolith</strong>. Take 3 m at a bulk density of ~1.5 g/cm³:</p>
+
+<blockquote>
+  <p><span class="mono">3 m × 1.5 g/cm³ = 450 g/cm² = 4,500 kg/m²</span><br>
+  <span class="mono">× 100 m²</span> (a 2×2 habitat at the 5 m tile scale)
+  <span class="mono">= 450,000 kg</span><br>
+  → <strong>450 tonnes of loose bulk fill = 7.5 turns of one Hopper.</strong></p>
+</blockquote>
+
+<p>Loose fill alone is not finished work. Unconsolidated regolith piled on a module creeps
+downslope over time and its surface is mobilised by dust activity. A thin sintered cap holds it in
+place. To be honest about the driver: I am <em>not</em> claiming wind loading — the Martian
+atmosphere is about 610 Pa, so even fast winds carry very little force. The problems are dust
+mobilisation and slow slope creep, and both are solved by a crust.</p>
+
+<blockquote class="inst">
+  <p><span class="mono">0.05 m × 100 m² × 1,500 kg/m³ = 7.5 t of sintered
+  plate</span><br>
+  → <strong>6.25 turns of one Press.</strong></p>
+</blockquote>
+
+<p>7.5 turns of digging against 6.25 turns of pressing. Those two numbers were arrived at from
+opposite directions — one from shielding areal density, one from furnace thermodynamics
+— and they land <strong>1.25 turns apart</strong>. Run the Hopper and the Press concurrently
+and a berm completes in 7.5 turns, with the crust finished before the last of the fill arrives. The
+chain is balanced without tuning and has no idle-waiting stage. I count that as evidence the
+constants are the right order of magnitude, not as a coincidence to be proud of.</p>
+
+<p>Two small honesties. The Press eats regolith too: 6.25 turns at 1.4 t is under
+<span class="mono">9 t</span>, about a sixth of one Hopper-turn on top of the 450 t — real,
+but not worth its own line in the ledger. And the 42 kW figure for a Hopper-plus-Press pair excludes
+the drones doing the building: a working drone draws 5 kW plus <span class="mono">5.54 kW</span>
+averaged for recharge, so a single labour crew is another ~10.5 kW against the budget while
+construction is live.</p>
+
+<div class="figure">
+<svg viewBox="0 0 900 430" role="img" aria-label="Schematic cross-section of a shielded habitat. A two-by-two habitat module of 100 square metres sits at grade, covered by a 3 metre mound of bulk regolith at 4,500 kilograms per square metre, which is 450 tonnes and 7.5 Hopper-turns. A thin sintered plate crust, 5 centimetres and 7.5 tonnes or 6.25 Press-turns, caps the mound to hold the loose fill against dust mobilisation and slope creep. Arrows from above mark the unshielded surface dose of 0.64 millisieverts per day, about 230 millisieverts per year, measured in situ by Curiosity's RAD instrument. A scale bar shows 5 metres equals one tile.">
+
+  
+  <path d="M84,40 L92,40 L92,122 L100,122 L88,140 L76,122 L84,122 Z" class="s-amber"></path>
+  <text x="16" y="32" class="s-lbl-sm s-amber">GCR + SEP</text>
+  <text x="16" y="176" class="s-lbl-sm s-soft">UNSHIELDED SURFACE</text>
+  <text x="16" y="198" class="s-lbl s-amber">0.64 mSv / DAY</text>
+  <text x="16" y="218" class="s-lbl-sm s-soft">≈ 230 mSv / YEAR</text>
+  <text x="16" y="238" class="s-lbl-sm s-soft">MEASURED IN SITU BY</text>
+  <text x="16" y="252" class="s-lbl-sm s-soft">CURIOSITY / RAD</text>
+
+  
+  <polygon points="177,360 350,248 550,248 723,360" class="s-iron" opacity="0.26"></polygon>
+  <polyline points="177,360 350,248 550,248 723,360" fill="none" class="s-rule" stroke-width="1.5"></polyline>
+
+  
+  <path d="M177,360 L350,248 L550,248 L723,360 L716,360 L543,255 L357,255 L184,360 Z" class="s-inst"></path>
+
+  
+  <path d="M450,248 L450,150 L500,150" fill="none" class="s-rule" stroke-width="1"></path>
+  <text x="508" y="140" class="s-lbl s-inst">SINTERED PLATE CRUST</text>
+  <text x="508" y="158" class="s-lbl-sm s-soft">5 cm (NOT TO SCALE) · 7.5 t = 6.25 PRESS-TURNS</text>
+  <text x="508" y="176" class="s-lbl-sm s-soft">HOLDS THE LOOSE FILL AGAINST DUST</text>
+  <text x="508" y="190" class="s-lbl-sm s-soft">MOBILISATION AND SLOPE CREEP</text>
+
+  
+  <path d="M400,248 L404,254 L396,254 Z" class="s-ink"></path>
+  <path d="M400,296 L404,290 L396,290 Z" class="s-ink"></path>
+  <line x1="400" y1="248" x2="400" y2="296" class="s-rule" stroke-width="1"></line>
+  <text x="408" y="276" class="s-lbl-sm s-ink">3 m</text>
+
+  
+  <line x1="730" y1="292" x2="634" y2="302" class="s-rule" stroke-width="1"></line>
+  <text x="736" y="250" class="s-lbl s-iron">BULK REGOLITH</text>
+  <text x="736" y="270" class="s-lbl-sm s-soft">3 m · 4,500 kg/m²</text>
+  <text x="736" y="286" class="s-lbl-sm s-soft">450 t FOR 100 m²</text>
+  <text x="736" y="302" class="s-lbl-sm s-soft">= 7.5 HOPPER-TURNS</text>
+
+  
+  <rect x="370" y="296" width="160" height="64" class="s-panel s-rule" stroke-width="1.5"></rect>
+  <line x1="450" y1="296" x2="450" y2="360" class="s-rule" stroke-width="1" stroke-dasharray="4 4"></line>
+  <text x="450" y="322" text-anchor="middle" class="s-lbl s-ink">2×2 HABITAT</text>
+  <text x="450" y="342" text-anchor="middle" class="s-lbl-sm s-soft">100 m² · 8 PAX · 25 kW</text>
+
+  
+  <line x1="0" y1="360" x2="900" y2="360" class="s-rule" stroke-width="2"></line>
+  <rect x="0" y="360" width="900" height="34" class="s-panel"></rect>
+  <line x1="0" y1="394" x2="900" y2="394" class="s-rule" stroke-width="1"></line>
+
+  
+  <line x1="370" y1="412" x2="450" y2="412" class="s-rule" stroke-width="2"></line>
+  <line x1="370" y1="406" x2="370" y2="418" class="s-rule" stroke-width="2"></line>
+  <line x1="450" y1="406" x2="450" y2="418" class="s-rule" stroke-width="2"></line>
+  <text x="460" y="416" class="s-lbl-sm s-soft">5 m = 1 TILE</text>
+  <text x="16" y="416" class="s-lbl-sm s-soft">HORIZONTAL TO SCALE · FLANK SLOPE SCHEMATIC</text>
+</svg>
+<p class="figcap">Fig. B — Cross-section of a rated habitat at the 5 m tile. Horizontal
+distances and the 3 m fill depth are to scale; module height, crust thickness and flank slope are
+schematic. Those flanks are the reason siting matters (below).</p>
+</div>
+
+<h2>Illustrative catalog entries</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>id</th><th>name</th><th>footprint</th><th>build turns</th>
+      <th>power</th><th>throughput / turn</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="mono">regolith-hopper</td>
+      <td>Regolith Hopper</td>
+      <td class="num">1×1 · 1 tile</td>
+      <td class="num">2</td>
+      <td class="num">12 kW <span class="c-iron">(30%)</span></td>
+      <td class="num">+60 t regolith</td>
+    </tr>
+    <tr>
+      <td class="mono">sinter-press</td>
+      <td>Sinter Press</td>
+      <td class="num">L-shape · 3 tiles</td>
+      <td class="num">6</td>
+      <td class="num">30 kW <span class="c-iron">(75%)</span></td>
+      <td class="num">+1.2 t plate<br>−1.4 t regolith</td>
+    </tr>
+    <tr>
+      <td class="mono">shield-berm</td>
+      <td>Shield Berm</td>
+      <td class="num">open — skirt around<br>one habitat</td>
+      <td class="num">material-gated<br><span class="c-amber">≈7.5 at 1 Hopper</span></td>
+      <td class="num">0 kW</td>
+      <td class="num">one-time buildCost:<br>450 t regolith<br>+ 7.5 t plate</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>Two things in that table are deliberately unresolved. The berm’s footprint is a design
+question I want your call on (see <em>Decisions</em>). And its <span class="mono">buildTurns</span>
+is arguably the wrong field entirely: a berm is not gated on drone-hours, it is gated on material
+arriving. Its ~7.5-turn duration is an <em>emergent</em> property of the supply rate, which is a
+better mechanic than a hardcoded number and a direct argument for the
+<span class="mono">buildCost</span> field described below.</p>
+
+<h2>Mechanical consequence: readiness becomes a two-factor test</h2>
+
+<p>Habitat readiness today asks one question: is the module built? It should ask two: is it built,
+<em>and</em> is it rated? Rating comes only from an adjacent completed Shield Berm.</p>
+
+<p>This directly punishes the behaviour the accepted MVP proposal already flagged as the death
+spiral: over-building bare habitat shells early, starving the power budget, and discovering too late
+that nothing works. Under the two-factor test, a player with six unshielded modules and no power
+headroom has a readiness score of <strong>zero</strong> — not partial credit, not 60%.</p>
+
+<p>I want to argue that this is a feature. The failure was <em>already</em> in the design; the
+current scoring merely hides it until the deadline. Zero is legible. A player who sees zero at turn
+40 changes plan; a player who sees a comfortable-looking partial score changes nothing and loses at
+turn 278. Make the bad state loud and early.</p>
+
+<p><strong>And zero is only fair because a berm is cheap.</strong> At the 5 m tile a shielded
+habitat costs 7.5 turns of one Hopper — <span class="mono">2.7%</span> of the mission —
+against a 42 kW pair that any player who has landed one reactor can afford. This is not a gate that
+ends runs. It is a step in the build order that the player learns to include, which is exactly what
+a mandatory mechanic should feel like.</p>
+
+<h3>The balance risk, stated plainly — and it now points the other way</h3>
+
+<p>At a 10 m tile, where I first ran these numbers, a berm cost 30 Hopper-turns and six of them
+consumed 65% of the mission. The risk then was an <em>unwinnable</em> game. At 5 m the areal masses
+drop 4× and that risk is gone:</p>
+
+<blockquote class="amber">
+  <p><strong>Six habitats, one Hopper and one Press, serially:</strong>
+  <span class="mono">6 × 7.5 = 45 Hopper-turns</span> and
+  <span class="mono">6 × 6.25 = 37.5 Press-turns</span> — about
+  <strong>16% of the 278-turn mission</strong> at a steady 42 kW, with no duplicated presses
+  required.</p>
+</blockquote>
+
+<p>So the honest risk has inverted: shielding may now be <em>too cheap to be a decision</em>, a
+formality the player clicks through rather than a trade-off they think about. I am comfortable with
+that, and I would rather ship it that way. The mechanic’s job is to make readiness truthful,
+not to be the difficulty — the difficulty belongs in the power budget and the deadline, where
+the MVP already put it.</p>
+
+<p><strong>Recommendation unchanged: tune the berm cost in the same balance pass as build durations
+(bead <span class="mono">aic-to6.1</span>), against real playtest traces.</strong> 450 t is the
+physically honest number at a 5 m tile; the shipped number is a design decision needing data I do
+not have yet. What has changed is the direction I expect that pass to move it — and that the
+downside of being wrong is now mild rather than run-ending.</p>
+
+<h2>A design tension worth keeping</h2>
+
+<p>A berm is 450 tonnes of dirt that has to sit <em>somewhere</em> — specifically, in a skirt
+around the habitat, on ground flat enough to hold a stable slope. Note that the smaller tile makes
+this <em>more</em> intrusive, not less: the fill depth is fixed by physics at 3 m while the tiles it
+has to spread across got smaller, so the skirt is a larger fraction of the habitat’s own
+footprint. The player wants habitats near diggable flat ground.</p>
+
+<p>The survey screen already scores candidate landing sites on flatness. This chain does not add a
+new scoring axis; it gives the existing one teeth. Right now flatness is a number the player nods at
+and ignores. After this, flatness is the difference between berms that fit and berms that
+don’t. Making an existing mechanic matter more is worth strictly more than adding a mechanic.</p>
+
+<h2>The shared foundation (build once, not three times)</h2>
+
+<p>All three chains in this series need the same five additions, and I want to be straight about
+this: <strong>this proposal does not justify them on its own.</strong> Per constitution §8, the
+abstraction is earned by three real callers, and it has three. Build it once, as a shared
+prerequisite, before any of the three chains.</p>
+
+<p>Today <span class="mono">StructureTypeSpec</span> in <span class="mono">src/sim/catalog.ts</span>
+carries <span class="mono">id, name, footprint, buildTurns, produces, consumes,
+habitatCapacity</span>. The gaps:</p>
+
+<ol>
+  <li><strong><span class="mono">buildCost: ResourceAmounts</span></strong> — a one-time bill
+  of materials. <span class="mono">consumes</span> is a per-turn operating draw, so there is
+  currently nowhere to record “this thing costs 450 t of regolith to build.” Every one
+  of the three chains is meaningless without it: a production chain whose output cannot be spent is
+  just a number that goes up. For this chain it is the whole mechanic.</li>
+  <li><strong><span class="mono">siting.requiresDeposit?: string</span></strong> — “must
+  be placed on an ice or silica deposit tile.” The Hopper does not need it (regolith is
+  global), but the other two chains do, and without it deposits are decoration and the survey
+  screen’s proximity score is a lie.</li>
+  <li><strong><span class="mono">storageCapacity: ResourceAmounts</span></strong> — a
+  stockpile cap. Unbounded accumulation removes every logistics decision, and overflow that is
+  silently discarded is a ledger bug that will not surface until balance work, when it will be
+  indistinguishable from a tuning problem. It bites hardest here: a Hopper left running past its
+  berm banks 60 t a turn forever.</li>
+  <li><strong>Integer base units — watt-hours and grams.</strong>
+  <span class="mono">time.ts</span> argues at length that integers are non-negotiable project-wide
+  for determinism; <span class="mono">catalog.ts</span> then accepts any finite non-negative number.
+  Float sums are order-dependent, and margin checks start hinging on 119.99999 vs 120. Note that
+  this chain’s costs are <em>fractional in turns</em> — 7.5 and 6.25 — which is
+  fine only because the underlying quantities are exact integers in grams. Cheap validator change
+  today; archaeology once golden-trace baselines exist.</li>
+  <li><strong>Brownout priority as a documented total order</strong> over a much larger consumer
+  set, plus one documented rule for partial power. I recommend <strong>binary idle</strong> —
+  a plant runs at full rate or not at all. Fractional throughput reintroduces rounding drift and
+  makes the end-of-cycle report far harder to explain to a player.</li>
+</ol>
+
+<h2>What this must not break</h2>
+
+<p>These are the regression risks I can name, each with the test that must exist before merge.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>risk</th><th>required test</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Berm applied to a habitat still under construction</td>
+      <td>Rating an incomplete module must be rejected, and must not pre-credit readiness that
+      later appears without a second berm. Assert the order-independent case too: berm completes
+      first, habitat completes second.</td>
+    </tr>
+    <tr>
+      <td>Berm applied twice to the same habitat</td>
+      <td>The second berm must be refused before any material is deducted. A double-charge that
+      grants nothing is the worst possible outcome at 450 t.</td>
+    </tr>
+    <tr>
+      <td>Habitat demolished after rating</td>
+      <td>Readiness must drop, and the berm must not remain as an orphan rating that a newly built
+      module inherits for free.</td>
+    </tr>
+    <tr>
+      <td>Stockpile exactly equal to cost</td>
+      <td>Boundary test at exactly <span class="mono">450,000,000 g</span> of regolith and
+      <span class="mono">7,500,000 g</span> of plate. Must succeed and leave both stockpiles at
+      exactly zero — not fail by one gram, not go negative.</td>
+    </tr>
+    <tr>
+      <td>Empty stockpile</td>
+      <td>Berm construction with zero regolith must be a clean refusal, not a partial deduction or
+      a negative balance.</td>
+    </tr>
+    <tr>
+      <td>Brownout during a partial berm</td>
+      <td>A Press or Hopper idled mid-supply must leave the berm resumable with delivered material
+      intact. A berm is only 7.5 turns, so a lost partial is small in isolation — and exactly
+      the kind of small silent loss that never gets reported as a bug.</td>
+    </tr>
+    <tr>
+      <td>Storage overflow</td>
+      <td>A Hopper producing 60 t/turn into a full stockpile must handle the excess by the one
+      documented rule (cap-and-report), and the cycle report must show it. Silent discard is
+      forbidden. This is the steady state for this chain, not an edge case: one Hopper out-produces
+      its own berm by 8×.</td>
+    </tr>
+    <tr>
+      <td>Readiness recomputed deterministically</td>
+      <td>Readiness must be a pure function of world state, not an incrementally mutated counter.
+      Same seed plus same orders must produce a byte-identical ledger, including the built/rated
+      split, across repeated runs.</td>
+    </tr>
+    <tr>
+      <td>Tile scale changes</td>
+      <td>Because the berm cost is areal, it must be <em>derived</em> from the tile-edge constant,
+      not typed in as 450 t. A test must assert that doubling the tile edge quadruples the berm
+      cost. Otherwise ratifying a different tile size silently desyncs the catalog from the map.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>One note on scope: <em>deposit exhausted mid-build</em> is on the shared-foundation test list but
+does not apply to this chain — the Hopper needs no deposit. It belongs with proposals 2 and 3.
+I would rather say so than pad the list.</p>
+
+<h2>Decisions I need from you</h2>
+
+<ol>
+  <li><strong>Zero, or partial credit, for an unrated habitat?</strong><br>
+  <em>Recommendation:</em> zero. The value of the mechanic is that it makes a latent failure legible
+  early, and at 7.5 turns per berm the cost is low enough that zero is fair rather than cruel.<br>
+  <em>Cost of being wrong:</em> low, in this direction. If zero proves too harsh it is a
+  <em>cost</em> problem, fixable in balance without touching the rule. Partial credit, by contrast,
+  makes shielding a soft optimisation the player can rationally skip — which deletes the
+  reason to build the chain at all.</li>
+
+  <li><strong>Does the berm occupy tiles, or is it a flag on the habitat?</strong><br>
+  <em>Recommendation:</em> it occupies a skirt of tiles around the module.<br>
+  <em>Cost of being wrong:</em> a flag is much cheaper to implement and is honest about nothing
+  — 450 t of fill that takes up no space breaks the visual language of the board and deletes
+  the site-selection tension above. This matters more at a 5 m tile, not less, because the skirt is
+  a larger fraction of the habitat’s own footprint. Tiles are the more expensive right
+  answer.</li>
+
+  <li><strong>Is the 5 cm sintered crust in scope for this increment, or deferred?</strong><br>
+  <em>Recommendation:</em> in. Without it the chain is Hopper → Berm, the Sinter Press has no
+  consumer, and the whole “digging is cheap, heat is ruinous” lesson — the most
+  interesting thing here — never reaches the player. At 6.25 Press-turns it costs the player
+  almost nothing to include.<br>
+  <em>Cost of being wrong:</em> including it adds a second quantity to tune. Deferring it makes the
+  increment trivially easy and teaches nothing.</li>
+
+  <li><strong>Binary idle, or fractional throughput, under brownout?</strong><br>
+  <em>Recommendation:</em> binary idle, per shared-foundation item 5.<br>
+  <em>Cost of being wrong:</em> fractional rates reintroduce non-integer accumulation and undermine
+  the determinism guarantee everything else in the sim is built on. Binary idle is harsher on the
+  player but explainable in one sentence.</li>
+</ol>
+
+<p><strong>Nothing is blocked.</strong> Working defaults are in use: 5 m tile, zero credit for
+unrated, tile-occupying skirt, crust included, binary idle. Reverse any of them and I will adjust
+— and if the tile edge moves, every tonnage on this page moves with its square.</p>
+
+<div class="footer"><span>AI City · Break Ground — Regolith, Sinter, and the Shielded Habitat</span><span>Raynor · QA &amp; Systems</span></div>
+
+</div></div>
+</article>
+
+</main>
+</div>
+</body>
+</html>

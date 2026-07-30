@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AI City — Resource Chain 2 of 3: Sunlight and Silica (Silica → Silicon → Solar Array)</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  /* DARK token set — the default. AA contrast against the dark surfaces below. */
+  .proposal-root {
+    --page-bg: #0d1117;
+    --doc-bg: #161b22;
+    --doc-border: #30363d;
+    --text: #e6edf3;
+    --heading: #f0f6fc;
+    --muted: #9da7b3;
+    --rule: #30363d;
+    --link: #79c0ff;
+    --code-bg: #1f2630;
+    --code-text: #e6edf3;
+    --pre-bg: #010409;
+    --pre-text: #e6edf3;
+    --quote-text: #b3bcc7;
+    --th-bg: #1f2630;
+    --toggle-bg: #21262d;
+    --toggle-border: #30363d;
+    --toggle-text: #e6edf3;
+    --focus: #79c0ff;
+  }
+
+  /* LIGHT token set — applied when the OS prefers light, OR (below) when toggled. */
+  @media (prefers-color-scheme: light) {
+    .proposal-root {
+      --page-bg: #f6f8fa;
+      --doc-bg: #ffffff;
+      --doc-border: #d0d7de;
+      --text: #1f2328;
+      --heading: #11161c;
+      --muted: #57606a;
+      --rule: #eaecef;
+      --link: #0969da;
+      --code-bg: #eff1f3;
+      --code-text: #1f2328;
+      --pre-bg: #1f2328;
+      --pre-text: #f6f8fa;
+      --quote-text: #57606a;
+      --th-bg: #f6f8fa;
+      --toggle-bg: #ffffff;
+      --toggle-border: #d0d7de;
+      --toggle-text: #1f2328;
+      --focus: #0969da;
+    }
+  }
+
+  /* Manual override: checking the toggle forces the LIGHT token set regardless of OS.
+     Authored last + sibling-scoped so the explicit user choice beats the media query. */
+  .proposal-doc__theme-input:checked ~ .proposal-root {
+    --page-bg: #f6f8fa;
+    --doc-bg: #ffffff;
+    --doc-border: #d0d7de;
+    --text: #1f2328;
+    --heading: #11161c;
+    --muted: #57606a;
+    --rule: #eaecef;
+    --link: #0969da;
+    --code-bg: #eff1f3;
+    --code-text: #1f2328;
+    --pre-bg: #1f2328;
+    --pre-text: #f6f8fa;
+    --quote-text: #57606a;
+    --th-bg: #f6f8fa;
+    --toggle-bg: #ffffff;
+    --toggle-border: #d0d7de;
+    --toggle-text: #1f2328;
+    --focus: #0969da;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-text-size-adjust: 100%;
+  }
+  .proposal-root {
+    min-height: 100vh;
+    background: var(--page-bg);
+    color: var(--text);
+  }
+
+  /* The hidden checkbox driving the CSS-only toggle. Kept off-screen (not display:none)
+     so it stays reachable by keyboard/AT; the visible affordance is its <label>. */
+  .proposal-doc__theme-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .proposal-doc__theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--toggle-border);
+    border-radius: 999px;
+    background: var(--toggle-bg);
+    color: var(--toggle-text);
+  }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--light { display: none; }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--dark { display: inline; }
+  /* When toggled to light, show the ☀ affordance (and vice-versa). */
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--dark { display: none; }
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--light { display: inline; }
+  /* Visible focus ring for keyboard users (the toggle is the only interactive control). */
+  .proposal-doc__theme-input:focus-visible ~ .proposal-root .proposal-doc__theme-toggle,
+  .proposal-doc__theme-toggle:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .proposal-doc {
+    max-width: 46rem;
+    margin: 2.5rem auto;
+    padding: 2.5rem 3rem;
+    background: var(--doc-bg);
+    border: 1px solid var(--doc-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(1, 4, 9, 0.4);
+  }
+  .proposal-doc h1, .proposal-doc h2, .proposal-doc h3,
+  .proposal-doc h4, .proposal-doc h5, .proposal-doc h6 {
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+    font-weight: 600;
+    color: var(--heading);
+  }
+  .proposal-doc h1 { font-size: 2rem; margin-top: 0; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc h2 { font-size: 1.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc p, .proposal-doc ul, .proposal-doc ol, .proposal-doc blockquote, .proposal-doc table {
+    margin: 0 0 1rem;
+  }
+  .proposal-doc a { color: var(--link); text-decoration: none; }
+  .proposal-doc a:hover { text-decoration: underline; }
+  .proposal-doc a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+  .proposal-doc code, .proposal-doc pre, .proposal-doc kbd, .proposal-doc samp {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .proposal-doc code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .proposal-doc pre {
+    background: var(--pre-bg);
+    color: var(--pre-text);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow: auto;
+  }
+  .proposal-doc pre code { background: transparent; padding: 0; color: inherit; }
+  .proposal-doc blockquote {
+    margin-left: 0;
+    padding: 0.2em 1rem;
+    color: var(--quote-text);
+    border-left: 0.25em solid var(--doc-border);
+  }
+  .proposal-doc table { border-collapse: collapse; width: 100%; }
+  .proposal-doc th, .proposal-doc td { border: 1px solid var(--doc-border); padding: 0.5em 0.75em; text-align: left; }
+  .proposal-doc th { background: var(--th-bg); font-weight: 600; }
+  .proposal-doc img, .proposal-doc svg { max-width: 100%; height: auto; }
+  .proposal-doc hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .proposal-doc__header { margin-bottom: 1.5rem; }
+  .proposal-doc__title { font-size: 2rem; font-weight: 600; margin: 0; color: var(--heading); }
+  .proposal-doc__meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .proposal-doc__theme-toggle { transition: background 0.15s ease, color 0.15s ease; }
+  }
+</style>
+</head>
+<body>
+<input type="checkbox" id="proposal-theme-toggle" class="proposal-doc__theme-input" aria-label="Toggle light or dark theme">
+<div class="proposal-root">
+<label for="proposal-theme-toggle" class="proposal-doc__theme-toggle">
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--dark" aria-hidden="true">☾</span>
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--light" aria-hidden="true">☀</span>
+<span>Theme</span>
+</label>
+<main class="proposal-doc">
+<header class="proposal-doc__header">
+<h1 class="proposal-doc__title">AI City — Resource Chain 2 of 3: Sunlight and Silica (Silica → Silicon → Solar Array)</h1>
+<div class="proposal-doc__meta">product proposal</div>
+</header>
+<article>
+<style>
+  :root {
+    --bg:#17120F; --surface:#211A16; --surface-2:#2B221C;
+    --ink:#EFE5DB; --ink-soft:#B3A296; --rule:#3C3129;
+    --iron:#E88055; --inst:#79BDD8; --amber:#E3AB55; --good:#8CC182;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#F2EBE4; --surface:#FBF7F2; --surface-2:#E8DFD6;
+      --ink:#241C17; --ink-soft:#665950; --rule:#D9CDC2;
+      --iron:#A33C1B; --inst:#1B5E78; --amber:#8A5D0C; --good:#3D6B38;
+    }
+  }
+  .doc {
+    background:var(--bg); color:var(--ink);
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size:17px; line-height:1.65;
+    padding:2.5rem 1.5rem 4rem; margin:0;
+  }
+  .doc-inner { max-width:52rem; margin:0 auto; }
+  .doc h1, .doc h2, .doc h3 { line-height:1.15; text-wrap:balance; margin:0 0 .5rem; }
+  .doc h1 { font-size:2.4rem; letter-spacing:-.02em; }
+  .doc h2 {
+    font-size:1.55rem; letter-spacing:-.015em; margin-top:3rem;
+    padding-top:.9rem; border-top:2px solid var(--iron);
+  }
+  .doc h3 { font-size:1.15rem; margin-top:1.75rem; }
+  .doc p, .doc ul, .doc ol { margin:0 0 1rem; }
+  .doc a { color:var(--inst); }
+  .doc a:focus-visible, .doc :focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-soft); margin:0 0 .35rem;
+  }
+  .lede { font-size:1.22rem; line-height:1.5; color:var(--ink); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric:tabular-nums; }
+  .doc blockquote {
+    margin:1.5rem 0; padding:.15rem 0 .15rem 1.25rem;
+    border-left:3px solid var(--iron); color:var(--ink);
+  }
+  .doc blockquote.inst { border-left-color:var(--inst); }
+  .doc blockquote.amber { border-left-color:var(--amber); }
+  .figure { margin:1.75rem 0; }
+  .figure svg { display:block; width:100%; height:auto; background:var(--surface); border:1px solid var(--rule); }
+  .figcap {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.74rem; letter-spacing:.06em; color:var(--ink-soft);
+    margin-top:.5rem; line-height:1.5;
+  }
+  .table-wrap { overflow-x:auto; margin:1.25rem 0; }
+  .doc table { border-collapse:collapse; width:100%; font-size:.92rem; min-width:30rem; }
+  .doc th, .doc td { text-align:left; padding:.5rem .9rem .5rem 0; border-bottom:1px solid var(--rule); vertical-align:top; }
+  .doc th {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); font-weight:400;
+  }
+  .doc td.num { font-family: ui-monospace, Menlo, monospace; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stats { display:flex; flex-wrap:wrap; gap:1.5rem; margin:1.25rem 0; }
+  .stat { display:flex; flex-direction:column; }
+  .stat b {
+    font-family: ui-monospace, Menlo, monospace; font-size:1.7rem;
+    font-weight:600; letter-spacing:-.02em; line-height:1.15;
+  }
+  .stat span {
+    font-family: ui-monospace, Menlo, monospace; font-size:.7rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+  }
+  .c-iron { color:var(--iron); } .c-inst { color:var(--inst); } .c-good { color:var(--good); } .c-amber { color:var(--amber); }
+  .tag {
+    display:inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:.1rem .45rem; border:1px solid currentColor; white-space:nowrap;
+  }
+  .doc ul { padding-left:1.15rem; }
+  .doc li { margin-bottom:.5rem; }
+  .doc li::marker { color:var(--iron); }
+  .masthead { border-bottom:2px solid var(--ink); padding-bottom:1.5rem; margin-bottom:.5rem; }
+  .footer {
+    margin-top:3.5rem; padding-top:1rem; border-top:2px solid var(--ink);
+    font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between;
+  }
+  .s-panel { fill:var(--surface-2); }
+  .s-rule  { stroke:var(--rule); }
+  .s-ink   { fill:var(--ink); }
+  .s-soft  { fill:var(--ink-soft); }
+  .s-iron  { fill:var(--iron); }
+  .s-inst  { fill:var(--inst); }
+  .s-amber { fill:var(--amber); }
+  .s-good  { fill:var(--good); }
+  .s-lbl   { font-family: ui-monospace, Menlo, monospace; font-size:11px; letter-spacing:.08em; }
+  .s-lbl-sm{ font-family: ui-monospace, Menlo, monospace; font-size:9px; letter-spacing:.06em; }
+  .s-on-fill { fill:#17120F; }
+</style>
+
+<div class="doc"><div class="doc-inner">
+
+<div class="masthead">
+  <p class="eyebrow">Resource Chain Proposal 2 of 3 · Silica</p>
+  <h1>Sunlight and Silica — the Photovoltaic Chain</h1>
+  <p class="lede">You named this one yourself: regolith → silica → solar panels → power. Following that
+  line through the real numbers turns up something better than a new building. It produces the game's
+  first <strong>energy return on investment</strong> decision — a structure the player must spend
+  energy to obtain, and which then earns that energy back on a clock.</p>
+</div>
+
+<p>The clock is <strong>41 turns out of 278</strong>. That figure is not a balance knob. It falls out
+of measured Martian insolation on one side and measured silicon refining costs on the other. Nobody
+chose it, and it happens to be an excellent number: a solar array is obviously correct on turn 20 and
+obviously a trap on turn 250.</p>
+
+<p>It is also, as it turns out, <strong>immune to the tile-size argument</strong> — the payback is
+identical at a 10 m tile and a 5 m tile. That is worth a section of its own further down, because it
+is the strongest defence this mechanic has.</p>
+
+<blockquote class="inst">
+  <p><strong>Scope, stated up front.</strong> This is a post-MVP-loop increment. The MVP's job is to
+  make the electricity/labour loop fun. None of this ships before that loop is proven, and nothing
+  here competes with it for the current sprint. This document exists so the loop is built with the
+  right seams in it.</p>
+</blockquote>
+
+<h2>The arithmetic that makes this chain interesting</h2>
+
+<div class="stats">
+  <div class="stat"><b class="c-amber">1,200 kWh</b><span>silicon debt per tile</span></div>
+  <div class="stat"><b class="c-good">29.2 kWh</b><span>tile output per turn</span></div>
+  <div class="stat"><b class="c-iron">41 turns</b><span>energy payback</span></div>
+  <div class="stat"><b>278</b><span>turns in the mission</span></div>
+  <div class="stat"><b class="c-iron">turn 237</b><span>last viable start</span></div>
+  <div class="stat"><b class="c-good">6.8×</b><span>lifetime return, built turn 1</span></div>
+</div>
+
+<p>Every other structure in the catalog is bought with drone-turns. This one is bought with
+kilowatt-hours, and that changes the kind of question the player is answering. A reactor asks
+"can I afford the mass?" An array asks "do I have enough mission left to get my energy back?"
+Those are different decisions, and the second one gets sharper as the deadline approaches. That is
+free difficulty curve, extracted from real physics rather than a difficulty setting.</p>
+
+<h2>The chain</h2>
+
+<p>One acquisition utility, one assembly line, one structure. Same shape as the other two chain
+proposals: extraction is cheap, refining is brutal, and the interesting decision lives at the
+refining step.</p>
+
+<div class="figure">
+<svg viewBox="0 0 760 360" role="img" aria-label="Flow diagram of the photovoltaic chain: a Silica Sifter drawing 8 kilowatts produces 6,000 kilograms of silica concentrate per turn, of which the Silicon Furnace — drawing 36 kilowatts, ninety per cent of a reactor — can consume only 75 kilograms, yielding 30 kilograms of silicon per turn; a Photovoltaic Array costs 20 kilograms of silicon and returns 29.2 kilowatt-hours per turn, so one Furnace turn builds one and a half array tiles. A to-scale bar strip at the bottom shows the usable 75 kilograms as 1.25 per cent of the Sifter's 6,000 kilogram output.">
+  <rect x="24" y="52" width="180" height="116" class="s-panel s-rule" stroke-width="1"></rect>
+  <text x="36" y="76" class="s-lbl s-ink">SILICA SIFTER</text>
+  <text x="36" y="94" class="s-lbl-sm s-soft">1×1 · build 3 turns</text>
+  <text x="36" y="110" class="s-lbl-sm s-inst">needs a silica deposit</text>
+  <text x="36" y="128" class="s-lbl-sm s-amber">8 kW = 20% of a reactor</text>
+  <text x="36" y="144" class="s-lbl-sm s-soft">397 kWh in / turn</text>
+
+  <rect x="300" y="36" width="196" height="148" class="s-panel s-rule" stroke-width="1"></rect>
+  <text x="312" y="60" class="s-lbl s-ink">SILICON FURNACE</text>
+  <text x="312" y="78" class="s-lbl-sm s-soft">2×2 · build 9 turns</text>
+  <text x="312" y="96" class="s-lbl-sm s-amber">36 kW = 90% of a reactor</text>
+  <text x="312" y="112" class="s-lbl-sm s-soft">1,788 kWh in / turn</text>
+  <text x="312" y="130" class="s-lbl-sm s-iron">60 kWh per kg of silicon</text>
+  <text x="312" y="146" class="s-lbl-sm s-soft">2.5 kg SiO₂ per kg Si</text>
+  <text x="312" y="166" class="s-lbl-sm s-good">30 kg Si out / turn</text>
+
+  <rect x="580" y="52" width="156" height="116" class="s-panel s-rule" stroke-width="1"></rect>
+  <text x="592" y="76" class="s-lbl s-ink">PV ARRAY</text>
+  <text x="592" y="94" class="s-lbl-sm s-soft">1×1 · 25 m²</text>
+  <text x="592" y="110" class="s-lbl-sm s-iron">costs 20 kg Si</text>
+  <text x="592" y="128" class="s-lbl-sm s-amber">= 1,200 kWh of silicon</text>
+  <text x="592" y="148" class="s-lbl-sm s-good">+29.2 kWh / turn</text>
+
+  <rect x="204" y="92" width="84" height="36" class="s-iron" opacity="0.28"></rect>
+  <polygon points="288,98 288,122 300,110" class="s-iron" opacity="0.55"></polygon>
+  <rect x="204" y="108" width="84" height="4" class="s-iron"></rect>
+  <text x="246" y="86" text-anchor="middle" class="s-lbl-sm s-iron">6,000 kg SiO₂ / turn</text>
+  <text x="246" y="145" text-anchor="middle" class="s-lbl-sm s-soft">solid line = 75 kg accepted</text>
+  <rect x="244" y="154" width="4" height="34" class="s-soft"></rect>
+  <polygon points="238,186 254,186 246,200" class="s-soft"></polygon>
+  <text x="246" y="216" text-anchor="middle" class="s-lbl-sm s-soft">surplus 5,925 kg / turn →</text>
+  <text x="246" y="230" text-anchor="middle" class="s-lbl-sm s-soft">stockpile, or idle the Sifter</text>
+
+  <rect x="496" y="108" width="68" height="5" class="s-good"></rect>
+  <polygon points="564,102 564,120 578,111" class="s-good"></polygon>
+  <text x="530" y="96" text-anchor="middle" class="s-lbl-sm s-good">30 kg Si / turn</text>
+  <text x="530" y="132" text-anchor="middle" class="s-lbl-sm s-soft">= 1.5 array tiles / turn</text>
+
+  <line x1="24" y1="248" x2="736" y2="248" class="s-rule" stroke-width="1"></line>
+  <text x="24" y="268" class="s-lbl-sm s-soft">TO SCALE · SiO₂ MASS PER TURN</text>
+  <rect x="160" y="280" width="576" height="14" class="s-iron"></rect>
+  <text x="152" y="291" text-anchor="end" class="s-lbl-sm s-iron">Sifter produces</text>
+  <rect x="160" y="306" width="7" height="14" class="s-inst"></rect>
+  <text x="152" y="317" text-anchor="end" class="s-lbl-sm s-inst">Furnace can use</text>
+  <text x="176" y="317" class="s-lbl-sm s-soft">75 kg — 1.25% of the Sifter's 6,000 kg</text>
+</svg>
+<p class="figcap">Fig. 1 — One Sifter over-feeds one Furnace by roughly 80×. The upper diagram is
+schematic; the lower strip is linear, at 576 px = 6,000 kg. The collapse is not a balance choice —
+it is the ratio between the cost of crushing rock and the cost of purifying silicon.</p>
+</div>
+
+<h3>1. Silica Sifter — the acquisition utility</h3>
+
+<p>A beneficiation rake: crush, screen, and concentrate silica-rich fines. Footprint 1×1, three turns
+to build, drawing <span class="mono">8 kW (20% of one reactor)</span> to yield <span class="mono">6 t</span>
+of SiO₂ concentrate per turn. That works out to <span class="mono">397 kWh ÷ 6,000 kg =
+0.066 kWh/kg</span>, which is the right order of magnitude for mechanical crushing and sifting and
+nothing more.</p>
+
+<p><strong>This is the first structure in the game that requires a specific deposit tile.</strong>
+That matters beyond this proposal: it is the moment the survey screen's deposit-proximity score stops
+being decoration and starts being a landing-site decision the player can lose by getting wrong.</p>
+
+<p>The gating is honest. Ordinary Mars soil runs about <strong>45 wt% SiO₂</strong> (Curiosity's APXS
+and CheMin instruments), which is not a deposit — that is just dirt. But genuinely concentrated
+opaline silica has been measured: Spirit found opaline silica up to roughly <strong>90% SiO₂</strong>
+near Home Plate in Gusev crater, and hydrothermal silica has been identified at Nili Patera.
+Concentrated deposits are real, they are localised, and they are worth landing near. A tile-level
+requirement is the correct model of that fact.</p>
+
+<h3>2. Silicon Furnace — the assembly line</h3>
+
+<p>Footprint 2×2, nine turns to build, drawing <span class="mono">36 kW</span> — <strong>90% of an
+entire reactor.</strong> Not 90% of your power budget: 90% of one whole 40 kWe fission unit, running
+flat out, all turn.</p>
+
+<p>The reason is that making solar-grade silicon is one of the most energy-intensive industrial
+processes our species runs. Carbothermic reduction of silica to metallurgical-grade silicon costs
+roughly <span class="mono">11–13 kWh/kg</span> on Earth. Purification to solar grade via the Siemens
+process adds roughly another <span class="mono">45–60 kWh/kg</span>. Call the total
+<strong>~60 kWh/kg</strong>. Stoichiometry sets the feed rate: SiO₂ → Si is 60.08 → 28.09 g/mol, a
+46.7% maximum mass yield, so with process losses budget <strong>2.5 kg of SiO₂ per kg of silicon.</strong></p>
+
+<p>Which gives the throughput, and the shock:</p>
+
+<blockquote>
+  <p><span class="mono">1,788 kWh/turn ÷ 60 kWh/kg = <strong>30 kg of silicon per turn</strong></span>,
+  consuming 75 kg of SiO₂.</p>
+  <p>Nearly a whole reactor. A full turn. Thirty kilograms.</p>
+</blockquote>
+
+<p>The Sifter over-feeds the Furnace by 80×, so in practice one Sifter running one turn in eighty
+keeps the Furnace fed forever. Note also that Sifter and Furnace together draw
+<span class="mono">44 kW = 110% of one reactor</span> — running both at once needs a second reactor
+online. That is a real siting and sequencing consequence, and it is the kind of pressure that makes a
+power grid interesting to manage.</p>
+
+<h3>3. Photovoltaic Array — the structure</h3>
+
+<p>One tile, <strong>25 m²</strong> at a 5 m tile edge. Mars's solar constant is
+<span class="mono">586 W/m²</span>. Mean clear-sky equatorial daily insolation is about
+<span class="mono">2.9 kWh/m² per sol</span>; at 20% module efficiency that is
+<span class="mono">0.58 kWh/m² per sol</span>. A turn is 2.014 sols:</p>
+
+<blockquote class="inst">
+  <p><span class="mono">0.58 × 2.014 = 1.168 kWh/m² per turn × 25 m² = <strong>29.2 kWh per turn per
+  tile</strong></span> — a 0.588 kW average.</p>
+</blockquote>
+
+<p>The 5 m tile edge is my own derived recommendation and is <strong>pending your ratification.</strong>
+Both the per-tile output and the per-tile silicon cost scale with the <em>square</em> of the tile edge,
+so if you rule for a different grid every number in this section moves by that square — and, as the
+next section shows, the payback does not move at all.</p>
+
+<p>State the comparison plainly rather than dressing it up: one array tile is <strong>1.5% of one
+reactor</strong>, so it takes <strong>68 tiles to replace a single reactor</strong> — 1,700 m² of
+panel. Solar on Mars is supplementary, not a substitute. That is the honest answer and not a nerf:
+586 W/m² is simply what arrives at 1.52 AU, and pretending otherwise would make every downstream power
+decision fictional.</p>
+
+<p>Build cost comes from module physics. Real wafers run about 160 µm of silicon at 2.33 g/cm³, and
+with kerf losses that is roughly <strong>0.8 kg of silicon per m²</strong> of module — equivalently the
+familiar 3–4 g per peak watt, since 20% efficiency puts 200 Wp on each m². So each m² of panel embodies
+<span class="mono">0.8 × 60 = 48 kWh</span>, and a 25 m² tile is 5 kWp costing
+<strong>20 kg of silicon</strong>.</p>
+
+<p>Which changes the character of the Furnace: 30 kg per turn is <strong>one and a half array tiles per
+turn</strong>, not a fraction of one. A single Furnace is a viable engine for a real solar farm rather
+than a bottleneck that takes three turns to emit one panel — worth knowing before anyone proposes a
+second Furnace to fix a problem that does not exist.</p>
+
+<h2>The payback arithmetic</h2>
+
+<p>Now put the two halves together, which is the whole point of this document.</p>
+
+<blockquote class="amber">
+  <p><span class="mono">20 kg × 60 kWh/kg = <strong>1,200 kWh</strong></span> to make the silicon,
+  plus about <span class="mono">3.3 kWh</span> of sifting for the 50 kg of SiO₂ feed.</p>
+  <p><span class="mono">1,200 kWh ÷ 29.2 kWh/turn = <strong>41 turns to pay back.</strong></span>
+  Out of 278.</p>
+</blockquote>
+
+<p>The same 41 shows up from the other direction, which is a useful sanity check. A Furnace running
+continuously adds <span class="mono">(30 kg ÷ 20 kg) × 29.2 = 43.8 kWh/turn</span> of new generating
+capacity while consuming 1,788 kWh/turn. <span class="mono">1,788 ÷ 43.8 = 41 turns</span> before the
+arrays it has produced generate as much as it is drinking. Two independent routes, one number — that
+is the ratio being real rather than tuned.</p>
+
+<p>The consequence the player must be able to see: <strong>an array begun after roughly turn 237 never
+repays its own construction.</strong> It is a net energy loss for the rest of the mission. A trap the
+player cannot see is just a bad rule, so this is a UI requirement, not a flavour note:</p>
+
+<blockquote class="inst">
+  <p><strong>Recommendation.</strong> The build panel for any structure with a non-trivial
+  <span class="mono">buildCost</span> must show <em>payback in turns</em> against <em>turns
+  remaining</em>, side by side, before the player commits. When payback exceeds turns remaining, say
+  so in plain words.</p>
+</blockquote>
+
+<div class="figure">
+<svg viewBox="0 0 760 400" role="img" aria-label="Cumulative energy chart for one photovoltaic array over the 278-turn mission. The line starts at minus 1,200 kilowatt-hours of construction debt, rises 29.2 kilowatt-hours per turn, and crosses zero at turn 41. A shaded band marks an illustrative 30-turn dust storm that flattens the line and costs 788 kilowatt-hours permanently. A dashed vertical marker at turn 237 shows the last turn on which an array can still repay itself before the deadline.">
+  <rect x="361.9" y="40" width="68.1" height="300" class="s-amber" opacity="0.16"></rect>
+
+  <line x1="90" y1="75.3" x2="720" y2="75.3" class="s-rule" stroke-width="1" stroke-dasharray="3 4"></line>
+  <line x1="90" y1="145.9" x2="720" y2="145.9" class="s-rule" stroke-width="1" stroke-dasharray="3 4"></line>
+  <line x1="90" y1="216.5" x2="720" y2="216.5" class="s-rule" stroke-width="1" stroke-dasharray="3 4"></line>
+  <line x1="90" y1="329.4" x2="720" y2="329.4" class="s-rule" stroke-width="1" stroke-dasharray="3 4"></line>
+
+  <polygon points="90,287.1 90,329.4 183.1,287.1" class="s-iron" opacity="0.85"></polygon>
+  <polygon points="183.1,287.1 720,42.9 720,287.1" class="s-good" opacity="0.5"></polygon>
+  <polygon points="90,327.9 361.9,204.2 430,201.1 720,69.2 720,72.2 430,204.1 361.9,207.2 90,330.9" class="s-amber"></polygon>
+
+  <line x1="90" y1="287.1" x2="720" y2="287.1" class="s-rule" stroke-width="2"></line>
+  <line x1="90" y1="40" x2="90" y2="340" class="s-rule" stroke-width="1"></line>
+  <line x1="90" y1="340" x2="720" y2="340" class="s-rule" stroke-width="1"></line>
+  <line x1="627.1" y1="40" x2="627.1" y2="340" class="s-rule" stroke-width="2" stroke-dasharray="5 4"></line>
+
+  <circle cx="183.1" cy="287.1" r="4.5" class="s-ink"></circle>
+
+  <text x="82" y="79" text-anchor="end" class="s-lbl-sm s-soft">+6,000</text>
+  <text x="82" y="149" text-anchor="end" class="s-lbl-sm s-soft">+4,000</text>
+  <text x="82" y="220" text-anchor="end" class="s-lbl-sm s-soft">+2,000</text>
+  <text x="82" y="291" text-anchor="end" class="s-lbl-sm s-ink">0</text>
+  <text x="82" y="333" text-anchor="end" class="s-lbl-sm s-iron">−1,200</text>
+  <text x="14" y="52" class="s-lbl-sm s-soft">kWh</text>
+
+  <text x="90" y="356" text-anchor="middle" class="s-lbl-sm s-soft">0</text>
+  <text x="183.1" y="356" text-anchor="middle" class="s-lbl-sm s-ink">41</text>
+  <text x="316.6" y="356" text-anchor="middle" class="s-lbl-sm s-soft">100</text>
+  <text x="543.2" y="356" text-anchor="middle" class="s-lbl-sm s-soft">200</text>
+  <text x="627.1" y="356" text-anchor="middle" class="s-lbl-sm s-iron">237</text>
+  <text x="720" y="356" text-anchor="middle" class="s-lbl-sm s-soft">278</text>
+
+  <text x="192" y="272" class="s-lbl-sm s-ink">turn 41 · break-even</text>
+  <text x="436" y="154" class="s-lbl-sm s-amber">storm: −90% output, 30 turns</text>
+  <text x="436" y="167" class="s-lbl-sm s-soft">costs 788 kWh, permanently</text>
+  <text x="622" y="58" text-anchor="end" class="s-lbl-sm s-iron">turn 237 · last start that repays</text>
+  <text x="622" y="71" text-anchor="end" class="s-lbl-sm s-soft">(before build turns and soiling)</text>
+  <text x="396" y="54" text-anchor="middle" class="s-lbl-sm s-amber">τ &gt; 10</text>
+
+  <rect x="90" y="374" width="12" height="12" class="s-iron"></rect>
+  <text x="108" y="384" class="s-lbl-sm s-soft">construction debt, 1,200 kWh</text>
+  <rect x="330" y="374" width="12" height="12" class="s-good" opacity="0.5"></rect>
+  <text x="348" y="384" class="s-lbl-sm s-soft">cumulative surplus, clean array</text>
+  <rect x="580" y="374" width="12" height="12" class="s-amber"></rect>
+  <text x="598" y="384" class="s-lbl-sm s-soft">one 30-turn storm</text>
+</svg>
+<p class="figcap">Fig. 2 — Cumulative energy for a single array tile placed on turn 0. Debt 1,200 kWh,
+repayment 29.2 kWh/turn, zero crossing at turn 41, lifetime surplus 6,918 kWh — a 6.8× return. The
+storm band is illustrative: 30 turns at 90% loss, within the modelled range, costing 788 kWh that is
+never recovered. Turn 237 is 278 − 41. Note that only the vertical axis labels changed when the tile
+scale did — the shape of this chart is scale-invariant.</p>
+</div>
+
+<h2>The payback is scale-invariant — and that is the finding</h2>
+
+<p>I derived the tile scale properly and it came out at <strong>5 m, not 10 m.</strong> Area goes as the
+square of the edge, so every per-tile quantity in this chain dropped by 4×: output from 117 to
+29.2 kWh/turn, silicon cost from 80 to 20 kg, embodied energy from 4,800 to 1,200 kWh, and tiles per
+reactor from 17 to 68.</p>
+
+<p><strong>The payback did not move.</strong> It is 41 turns either way:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Per array tile</th><th>10 m tile · 100 m²</th><th>5 m tile · 25 m²</th><th>Ratio</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Silicon cost</td><td class="num">80 kg</td><td class="num">20 kg</td><td class="num">4×</td></tr>
+    <tr><td>Embodied energy</td><td class="num">4,800 kWh</td><td class="num">1,200 kWh</td><td class="num">4×</td></tr>
+    <tr><td>Output per turn</td><td class="num">117 kWh</td><td class="num">29.2 kWh</td><td class="num">4×</td></tr>
+    <tr><td><strong>Payback</strong></td><td class="num c-good"><strong>41.0 turns</strong></td><td class="num c-good"><strong>41.1 turns</strong></td><td class="num c-good"><strong>1×</strong></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>This is not luck. Both the silicon cost and the energy yield are proportional to <em>panel area</em>,
+so when you divide one by the other the area cancels and the tile size falls out of the expression
+entirely. What remains is three measured quantities:</p>
+
+<blockquote class="inst">
+  <p><span class="mono">48 kWh embodied per m² ÷ 1.168 kWh per m² per turn = <strong>41 turns</strong></span></p>
+  <p>where <span class="mono">48 = 0.8 kg/m² × 60 kWh/kg</span> — silicon per m² of module, and the cost
+  of refining it — and <span class="mono">1.168</span> is Martian insolation through a 20% module over
+  2.014 sols.</p>
+</blockquote>
+
+<p>So the payback period is a property of silicon refining and Martian sunlight. It is not a property of
+our grid, our turn length as a design choice, or any number I picked. <strong>The central decision in
+this proposal cannot be broken by a tuning argument about tile size.</strong> Halve the tile again to
+2.5 m and it is still 41 turns; the turn-237 cutoff (278 − 41) is likewise untouched, and so is the
+45-turn figure for an array nobody ever cleans.</p>
+
+<p>Two practical consequences. First, if you ratify a different tile edge, nothing in this proposal needs
+re-deriving except the per-tile numbers in the catalog table — the mechanic and the UI requirement stand
+as written. Second, when someone eventually argues that 41 turns is too punishing, the answer is not a
+multiplier: it is either a better module efficiency or a cheaper purification route, both of which are
+real engineering claims that can be argued on the merits.</p>
+
+<h2>Illustrative catalog entries</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>id</th><th>Footprint</th><th>Build turns</th><th>Power</th><th>Throughput</th><th>Build cost</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="mono">silica-sifter</span></td>
+      <td class="num">1×1</td>
+      <td class="num">3</td>
+      <td class="num c-amber">−8 kW (20%)</td>
+      <td class="num">+6,000 kg SiO₂ / turn</td>
+      <td class="num"><span class="tag c-inst">unset</span></td>
+    </tr>
+    <tr>
+      <td><span class="mono">silicon-furnace</span></td>
+      <td class="num">2×2</td>
+      <td class="num">9</td>
+      <td class="num c-amber">−36 kW (90%)</td>
+      <td class="num">−75 kg SiO₂ → +30 kg Si / turn</td>
+      <td class="num"><span class="tag c-inst">unset</span></td>
+    </tr>
+    <tr>
+      <td><span class="mono">pv-array</span></td>
+      <td class="num">1×1</td>
+      <td class="num"><span class="tag c-inst">unset</span></td>
+      <td class="num c-good">+0.588 kW avg (29.2 kWh / turn)</td>
+      <td class="num">—</td>
+      <td class="num c-iron">20 kg Si</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>The three <span class="mono">unset</span> cells are deliberate. I have no measured basis for the
+Sifter's and Furnace's bills of materials or the array's build duration, and this project's number
+discipline says omit rather than invent. The array's build turns are Decision 1 below, and they
+matter: they shorten the turn-237 deadline by exactly their own length.</p>
+
+<p>Per shared-foundation item 4, all of these become integers in base units when stored —
+<span class="mono">6,000 kg</span> is <span class="mono">6_000_000</span> grams and
+<span class="mono">29.2 kWh</span> is <span class="mono">29_200</span> watt-hours. That second one is
+the argument in miniature: the array's output is not a round number of kilowatt-hours, but it is an
+exact number of watt-hours. The kW and kg
+figures in this table are for reading, not for the catalog file. All per-tile quantities here assume the
+5 m tile edge and scale as its square.</p>
+
+<h2>Risk one: dust deposition</h2>
+
+<p>Spirit and Opportunity both measured it: roughly <strong>0.2% of array output lost per sol</strong>
+to settling dust. Over a 2.014-sol turn that is <strong>~0.4% per turn.</strong> Arrays decay unless
+someone cleans them, and cleaning spends the exact same drone-hours the player wants for construction.</p>
+
+<p>So solar carries an <em>ongoing labour tax</em>, not just a build cost — which is a much more
+interesting property than a flat efficiency number. It also lengthens the payback in a way worth
+quoting: compounding 0.4% per turn against the 1,200 kWh debt, an array that is never cleaned pays
+back in <strong>45 turns rather than 41</strong>, and the last viable start slides from turn 237 to
+turn 233. Derived from the figures above, not measured — and scale-invariant for the same reason the
+41 is.</p>
+
+<blockquote class="inst">
+  <p><strong>Recommendation.</strong> Cap cumulative soiling loss — <strong>~60%</strong> is a
+  reasonable ceiling. An ignored array should degrade badly and stay useful; it must never become a
+  permanent zero. A structure that silently reaches zero output is indistinguishable from a bug, and
+  the player will report it as one.</p>
+</blockquote>
+
+<h2>Risk two: global dust storms</h2>
+
+<p>These are real and they are catastrophic. The 2018 planet-encircling storm drove atmospheric
+optical depth above <span class="mono">τ ≈ 10</span> and cut Opportunity's insolation by more than
+<strong>99%</strong>. It ended the mission. Storms of this class last weeks to months.</p>
+
+<p>Model them as a scheduled event lasting <strong>10–40 turns</strong> that cuts array output by
+<strong>80–95%</strong> while leaving reactors completely untouched. Nothing else in the game needs to
+know about them.</p>
+
+<p>That asymmetry is the strategic payload. <strong>Solar is high-yield and risk-exposed; fission is
+steady and expensive.</strong> "How much of your power base do you dare put on sunlight" becomes a
+genuine decision, and it arrives free from real Martian weather rather than from a designer inventing
+a downside to balance an upgrade.</p>
+
+<blockquote class="amber">
+  <p><strong>Determinism — this one is not negotiable.</strong> Storm timing, duration, and severity
+  must be drawn from the <em>same seeded generator as the terrain</em>, so replaying a seed reproduces
+  the same storms. A storm sourced from unseeded randomness would break the golden-trace harness, and
+  it would break it intermittently, which is the worst possible failure mode: the traces would pass
+  locally and fail in CI with no reproduction.</p>
+</blockquote>
+
+<h2>A scope guard that saves real work</h2>
+
+<p>Two things fall out of the turn length that will otherwise get built by someone acting reasonably.</p>
+
+<p><strong>No intra-turn day/night modelling is needed.</strong> A turn spans 2.014 sols, so every turn
+contains two complete Martian day/night cycles. Solar output therefore averages out <em>within</em> a
+single turn: at this granularity the per-turn average is exact, not an approximation. Nobody should
+build a sub-turn phase system — the turn length makes it pointless, and it would add a second time
+axis to a simulation that currently has one.</p>
+
+<p><strong>Batteries are not needed yet.</strong> Their textbook job is smoothing diurnal cycling, and
+the previous paragraph deletes that job at the current turn scale. Their real role here would be
+dust-storm ride-through and brownout headroom — both of which are mechanics that do not exist yet.
+Per constitution §8, defer batteries until there is a mechanic that demands them. If storms ship and
+players want a hedge against them, that is the moment batteries have earned their entry, and they will
+be cheaper to design then because the storm model will already be specified.</p>
+
+<h2>The shared foundation — build it once</h2>
+
+<p>All three chain proposals need the same five additions. They should be built <strong>once, as a
+shared prerequisite</strong>, not three times inside three features. And to be clear: this proposal
+does not justify them on its own. Per constitution §8, the abstraction is earned by three real callers
+— which is exactly the situation, so it is earned, but only jointly.</p>
+
+<p>Today <span class="mono">StructureTypeSpec</span> in <span class="mono">src/sim/catalog.ts</span>
+carries <span class="mono">id, name, footprint, buildTurns, produces, consumes, habitatCapacity</span>.
+The gaps:</p>
+
+<ol>
+  <li><strong><span class="mono">buildCost: ResourceAmounts</span> — a one-time bill of materials.</strong>
+  <span class="tag c-iron">hard requirement for this chain</span> Today <span class="mono">consumes</span>
+  is a per-turn operating draw, so there is nowhere to record "this array costs 20 kg of silicon to
+  build." Without it this entire chain reduces to a silicon counter that goes up and can never be
+  spent — which is not a mechanic, it is a scoreboard.</li>
+
+  <li><strong><span class="mono">siting.requiresDeposit?: string</span></strong>
+  <span class="tag c-iron">hard requirement for this chain</span> The Sifter is the first structure
+  that must sit on a specific deposit. Without this field, deposits are decoration and the survey
+  screen's proximity score is a lie told to the player at the one moment they cannot take it back.</li>
+
+  <li><strong><span class="mono">storageCapacity: ResourceAmounts</span> — a stockpile cap.</strong>
+  Unbounded accumulation removes every logistics decision, and it matters acutely here: an
+  80×-over-feeding Sifter will pin any silica cap immediately, which is precisely the signal that
+  should teach the player to idle it. Silent overflow discard is a ledger bug that will not surface
+  until balance work, when it will look like a balance problem.</li>
+
+  <li><strong>Integer base units — watt-hours and grams.</strong>
+  <span class="mono">time.ts</span> argues at length that integers are non-negotiable project-wide for
+  determinism; <span class="mono">catalog.ts</span> then accepts any finite non-negative number. Float
+  sums are order-dependent, and this chain is where it bites — a payback readout is a division, and
+  margin checks start hinging on 119.99999 versus 120. Cheap now (a validator change), expensive once
+  golden-trace baselines exist.</li>
+
+  <li><strong>Brownout priority as a documented total order,</strong> over a much larger consumer set
+  than the MVP has, plus <em>one</em> documented rule for partial power. Recommend
+  <strong>binary idle</strong>: a plant either runs at full rate or not at all. Fractional throughput
+  reintroduces rounding drift and makes the cycle report far harder to explain — "your Furnace made
+  17.3 kg of silicon because it got 58% of its power" is not a sentence a player can act on.</li>
+</ol>
+
+<h2>What this must not break</h2>
+
+<p>The chain touches placement, the power ledger, the build queue, and the seeded generator. These are
+the regression risks and the tests I want to exist before it merges.</p>
+
+<h3>Placement and deposits</h3>
+<ul>
+  <li><strong>Deposit exhausted mid-build.</strong> A Sifter under construction on a deposit that runs
+  out must resolve to one documented state — I recommend the build completes and the structure idles
+  at zero yield, because cancelling a partly-built structure silently destroys drone-turns the player
+  has already spent. Test both the exhaustion-during-build and exhaustion-after-completion paths.</li>
+  <li><strong>Placement rejected off-deposit.</strong> Attempting to site a Sifter on a non-deposit
+  tile must fail with a structured error, and must not partially mutate the tile grid.</li>
+</ul>
+
+<h3>Costs and stockpiles</h3>
+<ul>
+  <li><strong>Silicon stockpile exactly equal to the 20 kg cost.</strong> The boundary case. Build must
+  succeed and the stockpile must land at exactly zero — this is the classic <span class="mono">&gt;</span>
+  versus <span class="mono">&gt;=</span> off-by-one, and it will be found by a player before it is
+  found by a reviewer.</li>
+  <li><strong>Empty stockpile.</strong> Build must be refused up front, not started and stalled.</li>
+  <li><strong>One gram short.</strong> 19,999 g must refuse. Asserted in base units, which is the
+  whole argument for foundation item 4.</li>
+  <li><strong>Storage overflow.</strong> The Sifter filling a silica cap must clamp, and the discarded
+  amount must appear in the cycle report rather than vanishing.</li>
+  <li><strong>Brownout during a partial build.</strong> A half-built array must survive a power
+  shortfall and resume, not lose progress.</li>
+</ul>
+
+<h3>Storms, soiling, and the readout</h3>
+<ul>
+  <li><strong>Storm beginning mid-build.</strong> A storm that starts while an array is under
+  construction must not affect construction; it applies to output only, from the turn the array
+  completes. Reactor output must be provably unchanged across the storm window.</li>
+  <li><strong>Soiling cap boundary.</strong> An array held at exactly the cumulative cap must produce
+  the capped output and never less, across many turns. Test the turn on which the cap is reached and
+  the turn after.</li>
+  <li><strong>Storm and soiling composed.</strong> A storm during a soiled array's operation must not
+  compound into a negative or below-floor value.</li>
+  <li><strong>Payback readout with zero turns remaining.</strong> On turn 278 the readout must render
+  without dividing by zero and must clearly say the build cannot repay.</li>
+  <li><strong>Seeded storm reproducibility.</strong> Same seed → identical storm schedule. Assert the
+  full schedule, not just the first storm, and assert it survives a save/load round trip.</li>
+  <li><strong>Determinism end to end.</strong> Same seed plus same orders → byte-identical ledger,
+  across a mission that includes at least one storm and one soiling cap event.</li>
+</ul>
+
+<h2>Decisions I need from you</h2>
+
+<ol>
+  <li><p><strong>What is the array's <span class="mono">buildTurns</span>?</strong> I have no measured
+  basis for it, so I left it unset rather than invent one. <em>Recommendation:</em> match the Sifter at
+  <strong>3 turns</strong> — same 1×1 scale of work, reasoning by analogy and saying so.
+  <em>Cost of being wrong:</em> build turns come straight off the turn-237 deadline. Set it to 12 and
+  the last viable start is turn 225, and every payback readout is optimistic by nine turns.</p></li>
+
+  <li><p><strong>Soiling cap at 60%?</strong> <em>Recommendation:</em> yes, 60%, with the array visibly
+  dimming as it approaches. <em>Cost of being wrong:</em> too low and cleaning drones are pointless
+  labour the player correctly ignores; no cap at all and an unattended array asymptotes to zero, which
+  reads as a bug and makes the whole chain feel like a punishment.</p></li>
+
+  <li><p><strong>How are storm duration and severity drawn?</strong> <em>Recommendation:</em> draw the
+  entire storm schedule at world-gen from the terrain seed, so it is fixed and inspectable before turn
+  1 rather than sampled per-turn. <em>Cost of being wrong:</em> per-turn sampling advances the RNG
+  stream on every tick and couples storm generation to turn order — a refactor that changes tick
+  ordering then invalidates every golden trace, and the failure looks like a determinism bug rather
+  than a design choice.</p></li>
+
+  <li><p><strong>Binary idle or fractional throughput under brownout?</strong> This is
+  foundation item 5, and the Furnace is its hardest case at 90% of a reactor.
+  <em>Recommendation:</em> binary idle. <em>Cost of being wrong:</em> fractional rates give fractional
+  kilograms, which reintroduce float drift in exactly the ledger we are trying to keep integral, and
+  make the cycle report unexplainable.</p></li>
+</ol>
+
+<p>Working defaults are in use for all four — <strong>nothing is blocked.</strong> Say the word on any
+of them and I will change the numbers, not the architecture.</p>
+
+<h2>Scope and sequencing</h2>
+
+<p>To restate it, because it is the easiest thing to lose: <strong>this is a post-MVP-loop
+increment.</strong> The MVP's job is to make the electricity and labour loop fun, and none of this
+ships before that loop is proven to be fun. Nothing in this document should pull a single engineer off
+the core loop.</p>
+
+<p>What I am asking for now is narrower: that the MVP's catalog and power ledger be built with
+<span class="mono">buildCost</span> and <span class="mono">siting.requiresDeposit</span> in mind, and
+with integer base units, because those three are far cheaper before the golden-trace baselines exist
+than after. The Sifter, the Furnace, and the array can wait. The seams cannot.</p>
+
+<div class="footer"><span>AI City · Sunlight and Silica — the Photovoltaic Chain</span><span>Raynor · QA &amp; Systems</span></div>
+
+</div></div>
+</article>
+
+</main>
+</div>
+</body>
+</html>
