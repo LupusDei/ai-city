@@ -1,23 +1,44 @@
 /**
- * Drone roster, shifts & labour capacity — the core tension of the colony sim.
+ * Drone energetics: what one drone's recharge costs the colony grid.
  *
- * The ratified mechanic (per the General): a drone works one 25h shift, then must
+ * The ratified mechanic (per the General): a drone works one 25 h shift, then must
  * recharge for a full Mars sol before it can work again. Recharging draws colony
  * power. That single fact is what makes power and labour ONE constraint rather than
- * two independent ones: you cannot buy more build-rate by spending only labour-side
- * resources, because every drone that works this cycle first had to be *charged* by
- * the reactor. This module answers, for one turn: given a roster of drones and a
- * reactor power budget earmarked for drone charging, how many drones can actually be
- * on shift, how many must be held offline, and how much labour (robot-hours) does
- * that yield.
+ * two independent ones — you cannot buy more build-rate by spending only labour-side
+ * resources, because every drone that works this cycle first had to be CHARGED by the
+ * reactor.
  *
- * This module builds on `./time` (`labourCapacityHours`, `TurnCycleConfig`) rather
- * than duplicating either the 25h-shift constant or the hours-per-shift arithmetic —
- * `time.ts` is the single source of truth for the turn cycle, this module only adds
- * the power-supply constraint on top of it.
+ * This module now owns exactly that: the reality-grounded per-drone energy figures and
+ * their derivation. It no longer decides which drones get to charge.
+ *
+ * WHAT WAS REMOVED, AND WHY (aic-96o). `computeDroneShift`, `DroneShiftResult`,
+ * `maxDronesSupportedByPower` and `FLOOR_EPSILON` are gone. They resolved a roster
+ * against a FLOAT kW budget, and two things had made them wrong rather than merely
+ * superseded:
+ *
+ *   1. THE PRIORITY RULE CONTRADICTED THE ACCEPTED SPECS. Offline priority was a
+ *      drone's POSITION IN THE ROSTER ARRAY, which makes the outcome a property of how
+ *      the caller assembled its list rather than of the colony — two callers holding
+ *      the same colony could disagree, and a golden trace could pass for one and fail
+ *      for the other. Spec 003 FR-007 requires ascending instance id, which is
+ *      intrinsic to state. See docs/turn-composition-audit.md B5.
+ *   2. IT WAS THE LAST FLOAT IN THE POWER PATH, and the reason `FLOOR_EPSILON` had to
+ *      exist at all. The epsilon was never a workaround for a constant being inexact;
+ *      it was a consequence of dividing a float kW budget by a float per-drone draw, so
+ *      an exact-fit roster could land at `N - 1e-13` and floor to `N - 1`.
+ *
+ * Both are now handled by `power.ts`'s `resolveElectricity`, which models each drone as
+ * its OWN integer watt-hour demand and delegates ordering to `brownout.ts`. Because
+ * there is no division anywhere in that path, the epsilon did not need porting — it
+ * needed deleting. The class of error stopped existing rather than being compensated
+ * for, which is the same shape as the fix to `advanceConstruction` (aic-chg).
+ *
+ * The kWh/kW constants below are retained as the AUDITABLE DERIVATION of the ratified
+ * figures — they are what a reviewer checks the physics against — and
+ * `tests/unit/drones.test.ts` asserts they never drift from the integer watt-hour
+ * values that the sim actually uses.
  */
-import { MARS_SOL_SECONDS, labourCapacityHours } from './time'
-import type { TurnCycleConfig } from './time'
+import { MARS_SOL_SECONDS } from './time'
 
 /** A drone's stable identifier within the roster. */
 export type DroneId = string
@@ -99,15 +120,14 @@ export const DRONE_GRID_ENERGY_KWH =
  * rounding scattered across callers is precisely the silent inexactness the integer
  * discipline exists to prevent.
  *
- * WHY `FLOOR_EPSILON` BELOW STILL EXISTS. It would be satisfying to delete it now
- * that this constant is an integer, and that was the hoped-for prize. It cannot go
- * yet, and the reason is worth recording: the epsilon is not a workaround for THIS
- * value being inexact, it is a consequence of `maxDronesSupportedByPower` taking a
- * FLOAT kW budget as its input. Integer-dividing an integer Wh budget by this
- * constant is exact and needs no epsilon — so the epsilon dies when the caller
- * passes watt-hours, not when this constant becomes whole. That migration belongs
- * with the ledger wiring in aic-a00.6, where the caller is written, and it is
- * recorded there as an explicit acceptance criterion.
+ * HISTORICAL NOTE, corrected (aic-96o). An earlier version of this comment said
+ * `FLOOR_EPSILON` still existed below and would die only once the CALLER passed
+ * watt-hours rather than float kW. That analysis was right and the epsilon is now
+ * GONE — `maxDronesSupportedByPower` was removed with it, because the whole-turn
+ * capacity reservation in `power.ts` replaced the division that needed it. This
+ * comment is corrected rather than deleted because a comment describing code that
+ * no longer exists is exactly what hid aic-c1p for a day: `landing.ts` claimed no
+ * deposit-generation module existed long after one did. A stale comment is a defect.
  */
 export const DRONE_GRID_ENERGY_WH = Math.round(
   DRONE_RECHARGE_ENERGY_WH / CHARGE_EFFICIENCY +
@@ -135,135 +155,3 @@ export const DRONE_GRID_ENERGY_WH = Math.round(
  */
 export const DRONE_RECHARGE_DRAW_KW =
   (DRONE_GRID_ENERGY_KWH * SECONDS_PER_HOUR) / MARS_SOL_SECONDS
-
-/**
- * Tolerance added before flooring available-power-to-drone-count division.
- *
- * `DRONE_RECHARGE_DRAW_KW` is an irrational-ish floating-point value, so a caller
- * who computes "exactly enough power for N drones" as `N * DRONE_RECHARGE_DRAW_KW`
- * and passes that back in can hit IEEE-754 rounding that makes the quotient land at
- * `N - 1e-13` instead of exactly `N`. Without this epsilon, `Math.floor` would then
- * report `N - 1` drones supported — an off-by-one that silently under-counts an
- * exact-fit roster. The epsilon is far smaller than any physically meaningful power
- * shortfall (a real shortfall of even one hundredth of a drone's draw is orders of
- * magnitude larger than 1e-9), so it cannot mask a genuine insufficiency.
- */
-const FLOOR_EPSILON = 1e-9
-
-/** Result of resolving one turn's drone roster against the available charging power. */
-export interface DroneShiftResult {
-  /** Total number of drones in the roster, regardless of shift outcome. */
-  readonly rosterSize: number
-  /** How many drones were successfully charged and are on shift this turn. */
-  readonly dronesOnShift: number
-  /** How many drones could not be supplied recharge power and are held offline. */
-  readonly dronesHeldOffline: number
-  /**
-   * IDs of drones on shift, in roster order. Together with `offlineDroneIds` this
-   * exactly partitions the input roster — every id appears in exactly one array.
-   */
-  readonly onShiftDroneIds: readonly DroneId[]
-  /**
-   * IDs of drones held offline, in roster order (see the priority rule documented
-   * on `computeDroneShift`). Reported explicitly — never just a count — so the
-   * player-facing UI can show *which* drones are idle and why the build rate is
-   * lower than roster size would suggest.
-   */
-  readonly offlineDroneIds: readonly DroneId[]
-  /** Robot-hours of labour available this turn: `labourCapacityHours(config, dronesOnShift)`. */
-  readonly labourCapacityHours: number
-}
-
-/** @throws {RangeError} if `powerKw` is not a finite, non-negative number. */
-function assertValidPower(powerKw: number): void {
-  if (!Number.isFinite(powerKw) || powerKw < 0) {
-    throw new RangeError(
-      `availableChargingPowerKw must be a finite, non-negative number, received: ${powerKw}`,
-    )
-  }
-}
-
-/**
- * Validates roster shape: every id must be a non-empty string, and ids must be
- * unique. Uniqueness matters because the roster-order priority rule (see
- * `computeDroneShift`) reports offline status per id — a duplicate id would make
- * that report ambiguous (which of the two same-named drones is actually offline?).
- *
- * @throws {RangeError} on an empty-string id or a duplicate id.
- */
-function assertValidRoster(roster: readonly DroneId[]): void {
-  const seen = new Set<DroneId>()
-  for (const id of roster) {
-    if (id.length === 0) {
-      throw new RangeError('Drone roster contains an empty-string id')
-    }
-    if (seen.has(id)) {
-      throw new RangeError(`Drone roster contains a duplicate id: "${id}"`)
-    }
-    seen.add(id)
-  }
-}
-
-/**
- * How many drones the given power budget can simultaneously recharge, with no
- * upper bound applied yet (the caller separately clamps this to roster size).
- *
- * Floors rather than rounds: a drone cannot be "partially" recharged and put to
- * partial use this turn (see `FLOOR_EPSILON` for why an epsilon is added first).
- */
-function maxDronesSupportedByPower(availableChargingPowerKw: number): number {
-  return Math.floor(availableChargingPowerKw / DRONE_RECHARGE_DRAW_KW + FLOOR_EPSILON)
-}
-
-/**
- * Resolve one turn's drone roster against the reactor power earmarked for drone
- * charging, producing how many drones are on shift and the resulting labour
- * capacity.
- *
- * Offline-priority rule (documented, deterministic — never Set/Map iteration
- * order): drones are prioritized strictly by their POSITION IN THE `roster` ARRAY.
- * If the power budget supports fewer drones than the roster's size, the drones at
- * the LOWEST indices keep charging priority and stay on shift; the drones at the
- * HIGHEST indices are held offline first. This is a pure function of the roster
- * array's order and the power figure — it never depends on id sort order, hashing,
- * or any Set/Map's incidental iteration order, so the same roster and power always
- * produce the same offline set (a golden-trace/replay requirement).
- *
- * Rationale for "earliest position wins": the roster array is the caller's
- * authoritative ordering (e.g. build/acquisition order), so this reads naturally as
- * "longest-serving drones keep their charging slot; the newest additions to the
- * fleet are the first to be curtailed when power is tight" — a simple seniority
- * rule a player can learn and predict.
- *
- * @throws {RangeError} if `availableChargingPowerKw` is not a finite, non-negative
- *   number; if `roster` contains an empty-string or duplicate id; or if `config`
- *   fails `time.ts`'s own validation (delegated, not re-implemented here).
- */
-export function computeDroneShift(
-  config: TurnCycleConfig,
-  roster: readonly DroneId[],
-  availableChargingPowerKw: number,
-): DroneShiftResult {
-  assertValidPower(availableChargingPowerKw)
-  assertValidRoster(roster)
-
-  const maxSupported = Math.max(0, maxDronesSupportedByPower(availableChargingPowerKw))
-  const dronesOnShift = Math.min(roster.length, maxSupported)
-
-  const onShiftDroneIds = roster.slice(0, dronesOnShift)
-  const offlineDroneIds = roster.slice(dronesOnShift)
-
-  // Delegates to time.ts for the actual hours arithmetic (and its own config
-  // validation) rather than recomputing "25 * dronesOnShift" here, so the two
-  // modules can never silently disagree on what a drone-hour is.
-  const capacityHours = labourCapacityHours(config, dronesOnShift)
-
-  return {
-    rosterSize: roster.length,
-    dronesOnShift,
-    dronesHeldOffline: offlineDroneIds.length,
-    onShiftDroneIds,
-    offlineDroneIds,
-    labourCapacityHours: capacityHours,
-  }
-}

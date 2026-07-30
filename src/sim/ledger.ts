@@ -112,6 +112,80 @@ export interface Shortfall {
   readonly amount: number
 }
 
+/**
+ * A typed report that a resource was produced but could NOT be carried across the
+ * turn boundary, and is therefore gone.
+ *
+ * The exact mirror of `Shortfall`, and it exists for the identical reason: a surplus
+ * that vanishes without a trace is the same class of bug as a stockpile silently
+ * going negative. Both are ordinary, expected simulation outcomes reported as
+ * structured data so a caller can explain them, and neither is an error.
+ *
+ * Named for the energy case because that is the motivating one and it is physically
+ * literal — surplus electricity is dumped as heat through the radiators, it does not
+ * "spill" anywhere. The concept generalises to any flow resource: this is "produced,
+ * had nowhere to go".
+ */
+export interface Vented {
+  readonly resource: string
+  readonly amount: number
+}
+
+/**
+ * How a resource behaves across the turn boundary.
+ *
+ * RULED BY THE GENERAL (aic-96o): "No storing energy without barriers." Electricity
+ * is spent or lost within the turn that generates it, unless an explicit storage
+ * structure grants containment. Silica, water, oxygen and regolith are not like that
+ * — a pile of regolith is still there next turn whether or not anyone built a silo.
+ *
+ * So one stockpile model cannot serve every resource, and this is the distinction:
+ *
+ *   `stock` — carries over freely. The default, and correct for every mass resource.
+ *   `flow`  — carries over ONLY up to explicitly granted `storageCapacity`; anything
+ *             above that is `Vented` and gone.
+ *
+ * WHY THIS ARRIVES AS DATA AND NOT AS A BRANCH ON THE RESOURCE NAME: this module's
+ * founding contract is that resources are addressed by open string key and never by a
+ * hardcoded branch, so that a new resource kind is pure data. A `if (resource ===
+ * 'electricity')` here would break that permanently. The caller declares which
+ * resources are flows, and `ledger.ts` still does not know that electricity exists.
+ * `power.ts` owns that declaration, because `power.ts` owns electricity.
+ */
+export type AccumulationPolicy = 'stock' | 'flow'
+
+/**
+ * Per-resource accumulation rules for one `applyLedger` call.
+ *
+ * Both members are optional, and an absent policy means "every resource is a stock",
+ * which is exactly the behaviour this module had before the flow/stock distinction
+ * existed. That default is load-bearing: it keeps every pre-existing caller and test
+ * correct without modification, so adopting the policy is opt-in per call site rather
+ * than a breaking change nobody can stage.
+ */
+export interface LedgerPolicy {
+  /**
+   * Resources that are FLOWS. Anything not named here is a STOCK.
+   *
+   * A list rather than a full `Record<string, AccumulationPolicy>` because "stock" is
+   * the default for the open, unbounded key space — enumerating every stock resource
+   * would be impossible, and a map whose absent entries mean "stock" is the same
+   * information with more ways to get it wrong.
+   */
+  readonly flowResources?: readonly string[]
+  /**
+   * Carry-over capacity granted by the colony's storage structures, per resource, in
+   * base units. Consulted ONLY for flow resources.
+   *
+   * Stocks are deliberately left uncapped here. Capping them is a real and already
+   * tracked gap (see `applyLedger`'s KNOWN GAP note) requiring the same aggregation
+   * of `StructureType.storageCapacity` across completed structures — the same field,
+   * the same meaning, extended to stocks when that lands. Doing only the half the
+   * ruling requires keeps this change reviewable and does not pre-empt that design.
+   */
+  readonly storageCapacity?: Stockpile
+}
+
 /** The result of running one turn's flows against the prior stockpiles. */
 export interface LedgerResult {
   /** Per-resource production/consumption/net for this turn, sorted by resource name. */
@@ -120,10 +194,18 @@ export interface LedgerResult {
   readonly stockpiles: Stockpile
   /** Resources whose stockpile would have gone negative this turn, sorted by resource name. */
   readonly shortfalls: readonly Shortfall[]
+  /**
+   * Flow resources whose surplus could not be contained and is gone, sorted by
+   * resource name. Always empty when no flow resource was declared.
+   */
+  readonly vented: readonly Vented[]
 }
 
 /** A frozen, reusable empty stockpile — the default when a colony has none yet. */
 const EMPTY_STOCKPILE: Stockpile = {}
+
+/** The default policy: every resource is a stock, i.e. the pre-flow/stock behaviour. */
+const EMPTY_POLICY: LedgerPolicy = {}
 
 /**
  * All resource keys mentioned by any flow's `produces` or `consumes`, sorted.
@@ -199,15 +281,23 @@ export function computeBalances(flows: readonly ResourceFlow[]): readonly Resour
 export function applyLedger(
   flows: readonly ResourceFlow[],
   stockpiles: Stockpile = EMPTY_STOCKPILE,
+  policy: LedgerPolicy = EMPTY_POLICY,
 ): LedgerResult {
   const balances = computeBalances(flows)
   const balanceByResource = new Map(balances.map((balance) => [balance.resource, balance]))
+
+  // Membership-only use of a Set (never enumerated for order), matching the same
+  // idiom in `drones.ts` and `power.ts`. An absent `flowResources` yields an empty
+  // set, i.e. "every resource is a stock" — the documented default.
+  const flowResources = new Set(policy.flowResources ?? [])
+  const grantedCapacity = policy.storageCapacity ?? EMPTY_STOCKPILE
 
   const resources = new Set<string>([...Object.keys(stockpiles), ...balanceByResource.keys()])
   const sortedResources = [...resources].sort()
 
   const nextStockpiles: Record<string, number> = {}
   const shortfalls: Shortfall[] = []
+  const vented: Vented[] = []
 
   for (const resource of sortedResources) {
     const previous = stockpiles[resource] ?? 0
@@ -215,12 +305,29 @@ export function applyLedger(
     const raw = previous + net
 
     if (raw < 0) {
+      // A deficit is a deficit regardless of policy: running out is running out, and
+      // there is no surplus to vent on a turn that ended short.
       shortfalls.push({ resource, amount: -raw })
       nextStockpiles[resource] = 0
-    } else {
-      nextStockpiles[resource] = raw
+      continue
     }
+
+    if (!flowResources.has(resource)) {
+      nextStockpiles[resource] = raw
+      continue
+    }
+
+    // FLOW: carry over only what granted storage can contain. An absent capacity is
+    // 0, which is the battery-less colony — the surplus is entirely vented and the
+    // stockpile returns to zero every turn, however many turns run.
+    //
+    // `Math.min` of two integers is an integer, so the policy introduces no division
+    // and no float; the module's no-division discipline survives it intact.
+    const capacity = grantedCapacity[resource] ?? 0
+    const carried = Math.min(raw, capacity)
+    if (raw > carried) vented.push({ resource, amount: raw - carried })
+    nextStockpiles[resource] = carried
   }
 
-  return { balances, stockpiles: nextStockpiles, shortfalls }
+  return { balances, stockpiles: nextStockpiles, shortfalls, vented }
 }

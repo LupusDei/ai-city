@@ -77,6 +77,13 @@
  * ============================================================================
  */
 
+// `brownout.ts` owns the meaning of a priority class; this module only stores the
+// one a structure declares. Importing just the default keeps the normalise-optionals
+// contract honest (exactly one place decides what "unclassified" means) without this
+// module gaining any knowledge of the ordering rule itself. `brownout.ts` imports
+// nothing, so there is no cycle.
+import { PRIORITY_DEFAULT } from './brownout'
+
 /** A tile offset relative to a structure's anchor tile. */
 export interface FootprintOffset {
   readonly dx: number
@@ -208,6 +215,70 @@ export interface StructureTypeSpec {
    * make impossible.
    */
   readonly storageCapacity?: ResourceAmounts
+  /**
+   * PER-TURN draw while COMPLETE but not productive — the "idling" cost, as
+   * distinct from {@link StructureTypeSpec.consumes}, which is the rated draw while
+   * actually operating.
+   *
+   * RATIFIED BY THE GENERAL (aic-96o). An empty habitat draws neither nothing nor
+   * full rated, but a reduced standby figure of ~20% of rated. Two independent
+   * derivations agreed, which is why it is a figure and not a guess: fractionating
+   * the load (crew-dependent O2 generation, CO2 scrubbing, water recycling,
+   * humidity, lighting and food prep all fall to ~0 when empty, while thermal
+   * control, avionics, monitoring and trickle power for valves and pumps persist)
+   * gives ~20% -> 6.4 kW of a 32 kW rated module; and independently, holding a
+   * ~320 m2 envelope at +10 C against -60 C ambient at U ~ 0.3 W/m2K gives 6.7 kW.
+   *
+   * WHY IT IS DATA AND NOT A FRACTION THE SIM APPLIES: computing "20% of rated" at
+   * runtime means a division and a rounding inside the sim, which the base-units
+   * block above forbids for exactly the determinism reason stated there. The
+   * conversion belongs at authorship, like every other unit conversion here. The
+   * cost of that choice is that the two maps could drift, so `validateStandbyConsumes`
+   * enforces the one invariant that matters: standby may never EXCEED rated for any
+   * resource, and may not name a resource the structure does not consume at all.
+   *
+   * SHIELDING DEPENDENCE IS NOT MODELLED YET, and this is the hook for it. The same
+   * thermal calculation run on a BURIED habitat is striking: 3 m of regolith at
+   * k ~ 0.15 W/mK is U = 0.05 W/m2K alone, in series with a 0.20 W/m2K wall giving
+   * an effective ~0.04 — so shielding cuts the standby heating bill to roughly 20%
+   * of unshielded, ~0.9 kW. Burying a habitat for radiation also pays for itself in
+   * heat. Expressing that needs the `rated`/shielded flag that spec 002's Shield
+   * Berm introduces (FR-010/FR-011), which does not exist yet; when it does, this
+   * becomes a second authored standby map selected on shielded-ness, NOT a runtime
+   * multiplier. Tracked separately — see the bead filed from aic-96o.
+   *
+   * Optional; absent or `{}` means "draws nothing when not productive". An explicit
+   * `0` for a consumed resource is deliberately distinct from omitting the key: it
+   * states "this structure's entire load is crew-dependent", which a habitat with no
+   * standby heat requirement needs to be able to say. Non-negative integers in base
+   * units, same rule as every other resource map.
+   */
+  readonly standbyConsumes?: ResourceAmounts
+  /**
+   * This structure's slot in the brownout total order — see `brownout.ts`, which
+   * owns what the values MEAN and exports the named classes to author against
+   * (`PRIORITY_LIFE_SUPPORT`, `PRIORITY_HABITAT`, `PRIORITY_DRONE_RECHARGE`,
+   * `PRIORITY_PROCESSOR_DOWNSTREAM`, `PRIORITY_PROCESSOR_UPSTREAM`).
+   *
+   * Lower is higher priority, i.e. shed LAST. Authored as data rather than derived
+   * in code because deriving it would mean a branch on structure id somewhere, which
+   * is precisely the coupling this module exists to prevent — registering a new
+   * consumer in the brownout order must stay a catalog edit.
+   *
+   * This replaces the previous arrangement, in which `power.ts` took priority from
+   * the CALLER'S ARRAY POSITION. That made brownout outcomes a function of caller
+   * bookkeeping rather than of colony state, so two callers holding the same colony
+   * could get different brownouts and a golden trace could pass for one and fail for
+   * the other (docs/turn-composition-audit.md B6).
+   *
+   * Optional; absent normalises to `PRIORITY_DEFAULT`, which is LAST. Defaulting to
+   * last rather than middling is deliberate: a consumer nobody has classified should
+   * lose power before anything that has been reasoned about.
+   *
+   * This module holds the declaration, never the ordering rule — exactly as it holds
+   * `siting` without knowing anything about grids or deposits.
+   */
+  readonly priorityClass?: number
   /** Colonists this structure can house once complete. `0` for non-habitat structures. */
   readonly habitatCapacity: number
 }
@@ -224,7 +295,11 @@ export interface StructureTypeSpec {
  * — and no consumer can accidentally treat "author omitted it" differently from
  * "author wrote `{}`", since those are the same statement. `produces` and
  * `consumes` have always worked this way (required, authored as `{}`); after
- * validation the three new fields match them exactly.
+ * validation the optional fields match them exactly.
+ *
+ * `priorityClass` follows the same rule with a non-`{}` default: absent normalises
+ * to `PRIORITY_DEFAULT`, so no consumer writes `type.priorityClass ?? DEFAULT` and
+ * no two consumers can pick different defaults.
  *
  * Still assignable to `StructureTypeSpec`, so a validated type can be fed back
  * into `createCatalog` (e.g. a save-file round trip) without adaptation.
@@ -233,6 +308,8 @@ export interface StructureType extends StructureTypeSpec {
   readonly buildCost: ResourceAmounts
   readonly siting: SitingRequirements
   readonly storageCapacity: ResourceAmounts
+  readonly standbyConsumes: ResourceAmounts
+  readonly priorityClass: number
 }
 
 /**
@@ -348,6 +425,47 @@ function validateSiting(id: string, siting: SitingRequirements): void {
   }
 }
 
+/**
+ * Validate a `standbyConsumes` map against the rated `consumes` it must be a subset
+ * of.
+ *
+ * Two rules, both of which exist because the 20%-of-rated relationship lives in
+ * AUTHORED DATA rather than in runtime arithmetic (see
+ * `StructureTypeSpec.standbyConsumes` for why), and authored data can be wrong in
+ * ways no amount-level check would notice — both figures are perfectly valid
+ * integers on their own:
+ *
+ *   1. Standby may never EXCEED rated for a resource. A structure cannot cost more
+ *      to idle than to run. Catches the transposition (32,000 standby against 6,400
+ *      rated), which would otherwise produce a colony where switching a habitat off
+ *      costs more power than running it.
+ *   2. Standby may not name a resource the structure does not consume AT ALL. A rated
+ *      draw of zero means "never draws this", so a positive standby figure for it is
+ *      incoherent — and this is the exact shape a mistyped resource key takes
+ *      (`electricty`), which rule 1 alone would let through as 5 > 0.
+ *
+ * Amount-level integer validation is NOT repeated here; `validateResourceAmounts`
+ * already did it, so this function only checks the cross-field relationship.
+ */
+function validateStandbyConsumes(
+  id: string,
+  standbyConsumes: ResourceAmounts,
+  consumes: ResourceAmounts,
+): void {
+  for (const [resource, standby] of Object.entries(standbyConsumes)) {
+    const rated = consumes[resource] ?? 0
+    if (standby > rated) {
+      throw new RangeError(
+        `Structure "${id}": standbyConsumes.${resource} (${standby}) must not exceed ` +
+          `consumes.${resource} (${rated}) — a structure cannot cost more to idle than to run` +
+          (rated === 0
+            ? '. This structure does not consume that resource at all; check for a typo in the key.'
+            : ''),
+      )
+    }
+  }
+}
+
 function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   const { id } = specification
 
@@ -362,6 +480,8 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   const buildCost = specification.buildCost ?? {}
   const siting = specification.siting ?? {}
   const storageCapacity = specification.storageCapacity ?? {}
+  const standbyConsumes = specification.standbyConsumes ?? {}
+  const priorityClass = specification.priorityClass ?? PRIORITY_DEFAULT
 
   validateFootprint(id, specification.footprint)
   assertNonNegativeInteger(specification.buildTurns, `Structure "${id}": buildTurns`)
@@ -369,10 +489,13 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
     specification.habitatCapacity,
     `Structure "${id}": habitatCapacity`,
   )
+  assertNonNegativeInteger(priorityClass, `Structure "${id}": priorityClass`)
   validateResourceAmounts(id, specification.produces, 'produces')
   validateResourceAmounts(id, specification.consumes, 'consumes')
   validateResourceAmounts(id, buildCost, 'buildCost')
   validateResourceAmounts(id, storageCapacity, 'storageCapacity')
+  validateResourceAmounts(id, standbyConsumes, 'standbyConsumes')
+  validateStandbyConsumes(id, standbyConsumes, specification.consumes)
   validateSiting(id, siting)
 
   // Defensive copy of every mutable member: a catalog that aliases caller-owned
@@ -390,6 +513,8 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
     buildCost: { ...buildCost },
     siting: { ...siting },
     storageCapacity: { ...storageCapacity },
+    standbyConsumes: { ...standbyConsumes },
+    priorityClass,
   }
 }
 

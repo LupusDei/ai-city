@@ -5,6 +5,9 @@ import type { StructureTypeSpec } from '../../src/sim/catalog'
 // kind the deposit generator can actually emit. Deposits are only non-decorative if
 // the two open key spaces line up.
 import { DEFAULT_DEPOSIT_KINDS } from '../../src/sim/buildability'
+// Read-only, for the priorityClass tests: the catalog stores a structure's brownout
+// priority as authored data, and `brownout.ts` owns what the values MEAN.
+import { PRIORITY_DEFAULT, PRIORITY_HABITAT } from '../../src/sim/brownout'
 
 /** A minimal valid spec; individual tests override just the field under test. */
 function spec(overrides: Partial<StructureTypeSpec> = {}): StructureTypeSpec {
@@ -882,5 +885,150 @@ describe('createCatalog — a full three-stage chain from data alone', () => {
       siting: {},
       storageCapacity: {},
     })
+  })
+})
+
+/**
+ * `priorityClass` and `standbyConsumes` (aic-96o).
+ *
+ * Both exist to give the electricity path DATA where it previously had either a
+ * code branch or nothing at all:
+ *   - `priorityClass` is this structure's slot in the brownout total order. Before
+ *     it, `power.ts` derived priority from the CALLER'S ARRAY POSITION, so priority
+ *     was not a property of the colony at all (docs/turn-composition-audit.md B6).
+ *   - `standbyConsumes` is the draw of a COMPLETE but non-productive structure. The
+ *     General ruled that an empty habitat draws a reduced standby figure — ~20% of
+ *     rated, corroborated independently by a thermal-envelope calculation — rather
+ *     than nothing or full rated. The sim needs somewhere to put that number.
+ */
+describe('createCatalog — priorityClass', () => {
+  it('should carry an authored priority class through to the validated type', () => {
+    const catalog = createCatalog([spec({ priorityClass: PRIORITY_HABITAT })])
+    expect(getStructureType(catalog, 'habitat-module')?.priorityClass).toBe(PRIORITY_HABITAT)
+  })
+
+  it('should default an unauthored priority class to PRIORITY_DEFAULT', () => {
+    // Same normalise-optionals contract as buildCost/siting/storageCapacity: authors
+    // stay terse, consumers read exactly one shape and never write `?? DEFAULT`.
+    // Defaulting to LAST rather than middling is deliberate — a consumer nobody has
+    // classified should lose power before anything that has been reasoned about.
+    expect(getStructureType(createCatalog([spec()]), 'habitat-module')?.priorityClass).toBe(
+      PRIORITY_DEFAULT,
+    )
+  })
+
+  it.each([
+    ['a fraction', 1.5],
+    ['a negative', -1],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('should reject %s as a priority class', (_label, bad) => {
+    // Integer so class equality is exact: two priorities differing by 1e-15 would be
+    // an unorderable near-tie that the id tie-break never gets reached to resolve.
+    expect(() => createCatalog([spec({ priorityClass: bad })])).toThrow(RangeError)
+  })
+
+  it('should name the structure and the field when a priority class is invalid', () => {
+    expect(() => createCatalog([spec({ priorityClass: -1 })])).toThrow(
+      /habitat-module.*priorityClass/,
+    )
+  })
+})
+
+describe('createCatalog — standbyConsumes', () => {
+  it('should carry an authored standby draw through to the validated type', () => {
+    const catalog = createCatalog([
+      spec({ consumes: { electricity: 32_000 }, standbyConsumes: { electricity: 6_400 } }),
+    ])
+    expect(getStructureType(catalog, 'habitat-module')?.standbyConsumes).toEqual({
+      electricity: 6_400,
+    })
+  })
+
+  it('should default an unauthored standby draw to an empty map', () => {
+    // Absent means "draws nothing when not productive", correct for every structure
+    // with no crew-independent load at all.
+    expect(getStructureType(createCatalog([spec()]), 'habitat-module')?.standbyConsumes).toEqual({})
+  })
+
+  it('should reject a standby draw that exceeds the rated draw for the same resource', () => {
+    // THE invariant that stops the two maps drifting. Standby is by definition a
+    // SUBSET of rated operation — a structure cannot cost more to idle than to run.
+    // Without this an author could transpose the two figures and produce a colony
+    // where switching a habitat off costs more power than running it, which no test
+    // elsewhere would catch because both numbers are valid integers on their own.
+    expect(() =>
+      createCatalog([
+        spec({ consumes: { electricity: 6_400 }, standbyConsumes: { electricity: 32_000 } }),
+      ]),
+    ).toThrow(/standbyConsumes\.electricity/)
+  })
+
+  it('should reject a standby draw for a resource the structure never consumes', () => {
+    // A rated draw of 0 (an absent key) means the structure never draws that resource
+    // at all, so a positive standby figure for it is incoherent — and this is exactly
+    // the shape a typo'd resource key takes ("electricty").
+    expect(() =>
+      createCatalog([spec({ consumes: { electricity: 32_000 }, standbyConsumes: { water: 5 } })]),
+    ).toThrow(/standbyConsumes\.water/)
+  })
+
+  it('should accept a standby draw exactly equal to the rated draw', () => {
+    // The boundary, and a legitimate model: a structure whose entire load is
+    // crew-independent (a beacon, a circulation pump) idles at its running cost.
+    expect(() =>
+      createCatalog([
+        spec({ consumes: { electricity: 32_000 }, standbyConsumes: { electricity: 32_000 } }),
+      ]),
+    ).not.toThrow()
+  })
+
+  it('should accept a standby draw of exactly zero for a consumed resource', () => {
+    // Distinct from omitting the key, and a real statement: "this structure's entire
+    // load is crew-dependent, so empty it costs nothing." Mirrors why
+    // `storageCapacity` treats an explicit 0 as different from an absent key.
+    const catalog = createCatalog([
+      spec({ consumes: { electricity: 32_000 }, standbyConsumes: { electricity: 0 } }),
+    ])
+    expect(getStructureType(catalog, 'habitat-module')?.standbyConsumes).toEqual({ electricity: 0 })
+  })
+
+  it('should reject a non-integer standby amount', () => {
+    expect(() =>
+      createCatalog([
+        spec({ consumes: { electricity: 32_000 }, standbyConsumes: { electricity: 6_400.5 } }),
+      ]),
+    ).toThrow(RangeError)
+  })
+
+  it('should not alias an authored standby map into the validated type', () => {
+    // Same defensive-copy rule every other resource map follows: a validated catalog
+    // must be uncorruptible after the fact, INCLUDING into a state that could never
+    // have passed validation — here, a standby draw above rated.
+    const standbyConsumes: Record<string, number> = { electricity: 6_400 }
+    const catalog = createCatalog([spec({ consumes: { electricity: 32_000 }, standbyConsumes })])
+    standbyConsumes.electricity = 999_999
+    expect(getStructureType(catalog, 'habitat-module')?.standbyConsumes).toEqual({
+      electricity: 6_400,
+    })
+  })
+
+  it('should model the General’s ratified habitat standby figure as ~20% of rated', () => {
+    // The ruling, encoded as an executable example rather than left in a comment.
+    // Rated 4 kW/colonist x 8 = 32 kW; standby 20% = 6.4 kW. Two independent routes
+    // agreed (load fractionation 6.4 kW, thermal envelope 6.7 kW), which is why 20%
+    // is a figure rather than a guess. In base units, over one turn, both are whole.
+    const catalog = createCatalog([
+      spec({
+        id: 'habitat-8',
+        habitatCapacity: 8,
+        consumes: { electricity: 1_589_111 },
+        standbyConsumes: { electricity: 317_822 },
+      }),
+    ])
+    const habitat = getStructureType(catalog, 'habitat-8')!
+    // 20% of rated, to the watt-hour, with no division performed inside the sim.
+    expect(habitat.standbyConsumes.electricity! * 5).toBe(1_589_110)
+    expect(habitat.standbyConsumes.electricity!).toBeLessThan(habitat.consumes.electricity!)
   })
 })
