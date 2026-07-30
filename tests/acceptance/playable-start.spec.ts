@@ -181,7 +181,7 @@ test.describe('US2 — the landing choice is consequential', () => {
     const reason = page.locator(at(ID.rejectionReason))
     await expect(reason).toBeVisible()
     await expect(reason).toContainText(/out-of-bounds|unbuildable|overlapping-hulls/)
-    await expect(page.locator(at(ID.hullsPlaced))).toContainText('1')
+    await expect(page.locator(at(ID.hullsPlaced))).toContainText(/\b1\b/)
   })
 
   test('AC-2.4 begin is disabled until both hulls are placed, and says what is missing', async ({
@@ -190,10 +190,13 @@ test.describe('US2 — the landing choice is consequential', () => {
     await openSurvey(page)
     const begin = page.locator(at(ID.beginMission))
     await expect(begin).toBeDisabled()
-    await expect(page.locator(at(ID.hullsPlaced))).toContainText('0')
+    // Word-boundary throughout: the format is the survey screen's to choose ("0 of 2",
+    // "0/2"), so exact text would couple this test to a layout decision — but a bare
+    // substring lets a wrong count slip through. \b pins the number without pinning prose.
+    await expect(page.locator(at(ID.hullsPlaced))).toContainText(/\b0\b/)
     await page.locator(`[data-testid^="${ID.candidateSite}"]`).first().click()
     await expect(begin).toBeDisabled()
-    await expect(page.locator(at(ID.hullsPlaced))).toContainText('1')
+    await expect(page.locator(at(ID.hullsPlaced))).toContainText(/\b1\b/)
   })
 })
 
@@ -227,9 +230,12 @@ test.describe('US3 — the mission begins from the chosen landing', () => {
   }) => {
     await openSurvey(page)
     await landAndBegin(page)
-    await expect(page.locator(at(ID.turnReadout))).toContainText('1')
-    await expect(page.locator(at(ID.turnReadout))).toContainText('278')
-    await expect(page.locator(at(ID.habitatCapacity))).toContainText('0')
+    // Exact text, not substring. `toContainText('1')` would also be satisfied by
+    // "11 / 278" or "1 / 278" alike, which is not what "turn 1 of 278" means.
+    await expect(page.locator(at(ID.turnReadout))).toHaveText('1 / 278')
+    // Word-boundary regex, not a substring: "10" CONTAINS "0", so a habitat capacity
+    // of 10 would have satisfied `toContainText('0')`. Same class of hole as AC-edge's.
+    await expect(page.locator(at(ID.habitatCapacity))).toContainText(/\b0\b/)
     for (const id of [ID.powerGeneration, ID.powerDraw, ID.dronesOnShift]) {
       await expect(page.locator(at(id))).not.toBeEmpty()
     }
@@ -254,10 +260,13 @@ test.describe('US4 — the first turn resolves', () => {
   test('AC-4.1 End Cycle advances exactly one turn', async ({ page }) => {
     await openSurvey(page)
     await landAndBegin(page)
-    await expect(page.locator(at(ID.turnsRemaining))).toContainText('277')
+    // EXACT text throughout. `toContainText('2')` is a substring match, and
+    // "3 / 278" contains a '2' — via the 278 — so a guard that advanced TWO turns
+    // would have satisfied the old assertion. See the note on AC-edge below.
+    await expect(page.locator(at(ID.turnsRemaining))).toHaveText('277')
     await page.locator(at(ID.endCycle)).click()
-    await expect(page.locator(at(ID.turnReadout))).toContainText('2')
-    await expect(page.locator(at(ID.turnsRemaining))).toContainText('276')
+    await expect(page.locator(at(ID.turnReadout))).toHaveText('2 / 278')
+    await expect(page.locator(at(ID.turnsRemaining))).toHaveText('276')
   })
 
   test('AC-4.2 brownout and vented energy are reported, never silently dropped', async ({
@@ -279,9 +288,15 @@ test.describe('US4 — the first turn resolves', () => {
     await landAndBegin(page)
     const end = page.locator(at(ID.endCycle))
     await end.dblclick()
-    // Not 3. A double-fire here would desynchronise the display from the sim and,
-    // worse, silently consume a turn of a 278-turn budget.
-    await expect(page.locator(at(ID.turnReadout))).toContainText('2')
+    // CORRECTED. This previously asserted `toContainText('2')`, which is a SUBSTRING
+    // match — and "3 / 278" contains a '2' via the 278. So the exact defect this test
+    // exists to catch (a double-fire advancing two turns) would have PASSED it. The test
+    // was decorative. Found by the ops-screen agent, not by me.
+    //
+    // Asserted two ways now: the exact readout, and turns-remaining, where 276 and 275
+    // cannot be confused for one another by any substring accident.
+    await expect(page.locator(at(ID.turnReadout))).toHaveText('2 / 278')
+    await expect(page.locator(at(ID.turnsRemaining))).toHaveText('276')
   })
 
   test('★ AC-4.3 same seed, same landing, same orders -> identical turn-1 display', async ({
