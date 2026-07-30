@@ -98,6 +98,8 @@ import type {
 import type { MissionConfig } from '../../sim/mission'
 import { applyOrders } from '../../sim/orders'
 import type { OrderOutcome, PlayerOrder } from '../../sim/orders'
+import { deserializeColony, serializeColony } from '../../sim/persist'
+import type { SaveLoadFailure } from '../../sim/persist'
 import { DEFAULT_TURN_CYCLE, totalTurns } from '../../sim/time'
 import { resolveTurn } from '../../sim/turn'
 import type { ColonyState, CycleReport } from '../../sim/turn'
@@ -636,5 +638,214 @@ export function dispatch(state: GameState, action: GameAction): GameState {
       // behaviour — the same reason `construction.ts` keeps its documented unreachable
       // guard.
       return state
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Save and resume a mission (aic-oby.2)
+// ---------------------------------------------------------------------------
+//
+// THIS IS THE THIN HALF. `src/sim/persist.ts` owns every acceptance criterion for
+// this bead that actually matters for correctness — byte-identical round trip,
+// resuming and continuing matches an uninterrupted run exactly, malformed/truncated/
+// wrong-version saves are rejected with a clear message, never a crash. That rigor is
+// spent entirely on `ColonyState`, because that is the one part of a mission with
+// turn-to-turn state a bad round trip could silently corrupt (a dropped
+// `powerSourceState`, a coerced float, a resurrected duplicate id).
+//
+// `world` and `landing` are NOT put through that same machinery, and that is a
+// deliberate scope decision, not an oversight: `colony-start.ts` documents `world` as
+// the STATIC substrate (terrain, buildability, deposits) and `landing` as a one-time
+// SCORED RECORD of the opening choice — neither one accumulates anything turn over
+// turn, so there is no "resume and continue" property for either of them to get
+// wrong. They are carried through as plain data with a light existence check, which
+// is what keeps this half "thin": duplicating `persist.ts`'s full field-by-field
+// validation here for values that cannot desync a running mission would be effort
+// spent on the wrong risk.
+
+/** The mission-save envelope's own version, independent of `persist.ts`'s. */
+const MISSION_SAVE_FORMAT_VERSION = 1
+
+/**
+ * The on-disk shape of a saved mission.
+ *
+ * `colonyData` is the colony's OWN save string (`persist.ts`'s `serializeColony`
+ * output), embedded rather than inlined as a nested object. Two things fall out of
+ * that: the colony half of a mission save can be lifted out verbatim and handed to
+ * `deserializeColony` on its own (a bug report, a debug tool), and the colony format
+ * can gain its own version bump without forcing every mission save ever written to be
+ * rewritten — the two formats evolve independently on purpose.
+ */
+interface MissionSaveFile {
+  readonly formatVersion: typeof MISSION_SAVE_FORMAT_VERSION
+  readonly seed: number
+  readonly world: World
+  readonly landing: ReadyLanding
+  readonly colonyData: string
+}
+
+export interface SaveMissionSuccess {
+  readonly ok: true
+  /** Opaque to the caller — pass it to {@link loadMission} unmodified. */
+  readonly data: string
+}
+
+/** There is nothing to save while still surveying: no colony exists yet to resume. */
+export interface SaveMissionFailure {
+  readonly ok: false
+  readonly reason: 'not-running'
+}
+
+export type SaveMissionResult = SaveMissionSuccess | SaveMissionFailure
+
+/**
+ * Serialise the running mission to a string a player can store and load later.
+ *
+ * Refused (never thrown) unless a mission is actually RUNNING — there is no world,
+ * landing or colony to save from a still-in-progress survey.
+ */
+export function saveMission(state: GameState): SaveMissionResult {
+  if (state.phase !== 'running') return { ok: false, reason: 'not-running' }
+  const save: MissionSaveFile = {
+    formatVersion: MISSION_SAVE_FORMAT_VERSION,
+    seed: state.seed,
+    world: state.world,
+    landing: state.landing,
+    colonyData: serializeColony(state.colony),
+  }
+  return { ok: true, data: JSON.stringify(save) }
+}
+
+export type LoadMissionResult =
+  | { readonly ok: true; readonly state: RunningState }
+  | { readonly ok: false; readonly error: SaveLoadFailure }
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** A generic, always-safe rejection for the light checks in this half of the file. */
+function malformedMission(message: string): LoadMissionResult {
+  return { ok: false, error: { ok: false, kind: 'malformed', message } }
+}
+
+/**
+ * A light existence check, NOT a validation walk — see the section header for why
+ * `world` and `landing` do not get `persist.ts`'s full rigor. This exists only so a
+ * hand-edited or unrelated JSON blob fails here, with a clear message, rather than
+ * reaching a render path with a field silently missing.
+ */
+function looksLikeWorld(value: unknown): value is World {
+  return (
+    isPlainObject(value) &&
+    'terrain' in value &&
+    'buildability' in value &&
+    'deposits' in value &&
+    'grid' in value
+  )
+}
+
+/** See {@link looksLikeWorld}. */
+function looksLikeReadyLanding(value: unknown): value is ReadyLanding {
+  return (
+    isPlainObject(value) &&
+    value.status === 'ready' &&
+    'score' in value &&
+    'breakdown' in value &&
+    'droneHullTiles' in value &&
+    'reactorHullTiles' in value
+  )
+}
+
+/**
+ * Parse and validate a mission save produced by {@link saveMission}, or reject it with
+ * a typed, player-readable reason — NEVER throws, matching `persist.ts`'s own
+ * contract, which this function delegates the colony half of validation to entirely.
+ *
+ * Deliberately does not resume `lastReport`: a mission save has no record of what a
+ * turn already resolved did (only the state that resulted), so a freshly loaded
+ * mission reports `lastReport: null`, the same value a mission that has not yet taken
+ * its first turn reports. That is an honest "we don't know", not a claim that nothing
+ * happened — `outlook`, by contrast, is always recomputed fresh from the loaded
+ * colony, because it is a pure forecast `resolveTurn` can reproduce from state alone.
+ *
+ * @throws Never. Every rejection is a `LoadMissionResult` with `ok: false`.
+ */
+export function loadMission(raw: string): LoadMissionResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return malformedMission('This save file is not readable and cannot be loaded.')
+  }
+  if (!isPlainObject(parsed)) {
+    return malformedMission('This save file is not readable and cannot be loaded.')
+  }
+
+  const formatVersion = parsed.formatVersion
+  if (typeof formatVersion !== 'number' || !Number.isInteger(formatVersion)) {
+    return malformedMission('This save file has no valid version number and cannot be loaded.')
+  }
+  if (formatVersion !== MISSION_SAVE_FORMAT_VERSION) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        kind: 'version-mismatch',
+        message:
+          `This save was made with mission format ${formatVersion}, but this version of ` +
+          `the game reads format ${MISSION_SAVE_FORMAT_VERSION}. It cannot be loaded here.`,
+      },
+    }
+  }
+
+  const seed = parsed.seed
+  if (typeof seed !== 'number' || !Number.isInteger(seed)) {
+    return malformedMission('This save file has no valid seed and cannot be loaded.')
+  }
+  if (!looksLikeWorld(parsed.world)) {
+    return malformedMission('This save file has no valid surveyed world and cannot be loaded.')
+  }
+  if (!looksLikeReadyLanding(parsed.landing)) {
+    return malformedMission('This save file has no valid landing record and cannot be loaded.')
+  }
+  if (typeof parsed.colonyData !== 'string') {
+    return malformedMission('This save file has no valid colony data and cannot be loaded.')
+  }
+
+  const colonyResult = deserializeColony(parsed.colonyData)
+  if (!colonyResult.ok) return { ok: false, error: colonyResult }
+  const colony = colonyResult.colony
+
+  // Mirror `advanceCycle`'s own guard: a concluded mission's `outlook` is `null`
+  // forever, and `resolveTurn` must never be called again past that point (see its
+  // doc — the verdict is meant to stay fixed once the deadline turn is reached).
+  const concluded = colony.turnsTaken >= totalTurns(colony.mission.turnCycle)
+
+  return {
+    ok: true,
+    state: {
+      phase: 'running',
+      seed,
+      world: parsed.world,
+      landing: parsed.landing,
+      colony,
+      // REGENERATED, not saved. The storm timeline is a pure function of the mission
+      // seed and the mission length, so recomputing it on load is guaranteed to
+      // reproduce the exact schedule the mission was already running under — the same
+      // determinism guarantee the whole sim rests on. Persisting it would add a second
+      // copy of derivable data that could drift from the generator, and a save written
+      // before a weather-tuning change would then resume under stale weather.
+      //
+      // This gap was found by a typecheck failure when save/load and the storm
+      // scheduler were merged (each was built without the other). It was not merely a
+      // missing field: a loaded mission would have carried an EMPTY timeline, so the
+      // weather would simply never come again for the rest of that save — a silent,
+      // permanent loss of the game's only environmental pressure.
+      weatherTimeline: generateStormTimeline(seed, totalTurns(colony.mission.turnCycle)),
+      lastReport: null,
+      outlook: concluded ? null : resolveTurn(colony).report,
+      orderOutcomes: [],
+    },
   }
 }

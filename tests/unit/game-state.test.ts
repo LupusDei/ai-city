@@ -39,7 +39,9 @@ import {
   MAP_DIMENSION,
   beginSurvey,
   dispatch,
+  loadMission,
   placedHulls,
+  saveMission,
 } from '../../src/app/state/game-state'
 import type { GameAction, GameState, RunningState, SurveyingState } from '../../src/app/state/game-state'
 
@@ -771,5 +773,202 @@ describe('clear-selection (re-plot the landing)', () => {
     const cleared = dispatch(opening, { kind: 'clear-selection' }) as SurveyingState
     expect(cleared.selection).toEqual(opening.selection)
     expect(cleared.world).toBe(opening.world)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// saveMission / loadMission (aic-oby.2)
+// ---------------------------------------------------------------------------
+
+/** Resolve `n` end-cycle intents in sequence, threading the running state through. */
+function advanceNTurns(state: RunningState, n: number): RunningState {
+  let s = state
+  for (let i = 0; i < n; i++) s = asRunning(endCycle(s))
+  return s
+}
+
+describe('saveMission', () => {
+  it('should refuse to save while still surveying, naming why', () => {
+    expect(saveMission(readySurvey())).toEqual({ ok: false, reason: 'not-running' })
+  })
+
+  it('should save a running mission as opaque string data', () => {
+    const result = saveMission(started())
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('unreachable')
+    expect(typeof result.data).toBe('string')
+    expect(result.data.length).toBeGreaterThan(0)
+  })
+})
+
+describe('loadMission', () => {
+  it('should load a freshly saved mission into an equivalent running state', () => {
+    const running = advanceNTurns(started(), 3)
+    const saved = saveMission(running)
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+
+    const loaded = loadMission(saved.data)
+    if (!loaded.ok) throw new Error(`expected ok, got ${loaded.error.kind}: ${loaded.error.message}`)
+    expect(loaded.state.phase).toBe('running')
+    expect(loaded.state.seed).toBe(running.seed)
+    expect(loaded.state.colony).toEqual(running.colony)
+    expect(loaded.state.world).toEqual(running.world)
+    expect(loaded.state.landing).toEqual(running.landing)
+    expect(loaded.state.orderOutcomes).toEqual([])
+  })
+
+  it('should restore the storm timeline so the weather still comes after loading', () => {
+    // REGRESSION (found when save/load and the storm scheduler were merged — each was
+    // built without the other). loadMission originally rebuilt the running state with
+    // no weatherTimeline at all. That is not a cosmetic omission: the loaded mission
+    // would have run the rest of its 278 turns under a permanently empty schedule, so
+    // no storm would ever begin again. The game's only environmental pressure would
+    // vanish silently at the moment a player saved and resumed.
+    //
+    // It is REGENERATED from the seed rather than persisted, so this also pins that the
+    // recomputed schedule is identical to the one the mission was already running.
+    const running = advanceNTurns(started(), 3)
+    const saved = saveMission(running)
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+
+    const loaded = loadMission(saved.data)
+    if (!loaded.ok) throw new Error(`expected ok, got ${loaded.error.kind}`)
+
+    expect(loaded.state.weatherTimeline).toEqual(running.weatherTimeline)
+    expect(loaded.state.weatherTimeline).not.toEqual([])
+  })
+
+  it('should recompute a fresh outlook from the loaded colony rather than trusting a stale one', () => {
+    const running = advanceNTurns(started(), 2)
+    const saved = saveMission(running)
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const loaded = loadMission(saved.data)
+    if (!loaded.ok) throw new Error('expected loadMission to succeed')
+    expect(loaded.state.outlook).toEqual(resolveTurn(running.colony).report)
+  })
+
+  it('THE REAL TEST: resuming a saved mission and continuing matches an uninterrupted run', () => {
+    const opening = started()
+    const uninterrupted = advanceNTurns(opening, 3 + 4)
+
+    const savedAtMidpoint = advanceNTurns(opening, 3)
+    const saved = saveMission(savedAtMidpoint)
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const loaded = loadMission(saved.data)
+    if (!loaded.ok) throw new Error(`expected ok, got ${loaded.error.kind}`)
+
+    const afterResume = advanceNTurns(loaded.state, 4)
+    expect(afterResume.colony).toEqual(uninterrupted.colony)
+  })
+
+  it('should reject unreadable text without throwing', () => {
+    const result = loadMission('not json at all {{{')
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.kind).toBe('malformed')
+    expect(result.error.message.length).toBeGreaterThan(0)
+  })
+
+  it('should reject a save from a different mission-format version', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const parsed = JSON.parse(saved.data) as { formatVersion: number }
+    parsed.formatVersion = 999
+    const result = loadMission(JSON.stringify(parsed))
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.kind).toBe('version-mismatch')
+  })
+
+  it('should reject a save with a missing or non-integer formatVersion as malformed', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const parsed = JSON.parse(saved.data) as Record<string, unknown>
+    delete parsed.formatVersion
+    const result = loadMission(JSON.stringify(parsed))
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.kind).toBe('malformed')
+  })
+
+  it('should reject a save whose world is missing a required field', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const parsed = JSON.parse(saved.data) as { world: Record<string, unknown> }
+    delete parsed.world.deposits
+    const result = loadMission(JSON.stringify(parsed))
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.kind).toBe('malformed')
+    expect(result.error.message).toContain('world')
+  })
+
+  it('should reject a save whose landing is not a ready landing', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const parsed = JSON.parse(saved.data) as { landing: Record<string, unknown> }
+    parsed.landing.status = 'rejected'
+    const result = loadMission(JSON.stringify(parsed))
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.kind).toBe('malformed')
+    expect(result.error.message).toContain('landing')
+  })
+
+  it('should reject a save whose colonyData is not a string', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const parsed = JSON.parse(saved.data) as Record<string, unknown>
+    parsed.colonyData = { not: 'a string' }
+    const result = loadMission(JSON.stringify(parsed))
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.kind).toBe('malformed')
+    expect(result.error.message).toContain('colony data')
+  })
+
+  it('should load a concluded mission with a null outlook, matching a live conclusion', () => {
+    // Mirrors `advanceCycle`'s own end-of-mission guard: once the deadline turn is
+    // reached, `outlook` stays `null` forever and no further turn may be resolved.
+    // A save taken AFTER the mission concluded must load into that same frozen state,
+    // not accidentally resolve one turn past the deadline.
+    let running = started(SHORT_MISSION)
+    running = advanceNTurns(running, 2) // SHORT_MISSION's full 2-turn length
+    expect(running.outlook).toBeNull()
+
+    const saved = saveMission(running)
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const loaded = loadMission(saved.data)
+    if (!loaded.ok) throw new Error(`expected ok, got ${loaded.error.kind}`)
+    expect(loaded.state.outlook).toBeNull()
+    expect(loaded.state.colony).toEqual(running.colony)
+  })
+
+  it('should propagate a colony-level rejection from persist.ts verbatim, never crashing', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const parsed = JSON.parse(saved.data) as { colonyData: string }
+    // Corrupt just the embedded colony sub-save, leaving the mission envelope intact.
+    parsed.colonyData = parsed.colonyData.slice(0, -5)
+    const result = loadMission(JSON.stringify(parsed))
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(['malformed', 'truncated']).toContain(result.error.kind)
+  })
+
+  it('should never throw for any malformed, truncated or wrong-version input', () => {
+    const saved = saveMission(started())
+    if (!saved.ok) throw new Error('expected saveMission to succeed')
+    const badInputs = [
+      '',
+      '{',
+      'null',
+      '42',
+      saved.data.slice(0, Math.floor(saved.data.length / 2)),
+      JSON.stringify({ formatVersion: 1 }),
+    ]
+    for (const raw of badInputs) {
+      expect(() => loadMission(raw)).not.toThrow()
+    }
   })
 })
