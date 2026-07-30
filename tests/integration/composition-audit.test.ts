@@ -57,6 +57,12 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // --- Public API awaiting an application layer (aic-hfb) ---
   'turn.createColony',
   'turn.resolveTurn',
+  // orders.applyOrders is spec 005 T003's player-order layer: the composition root
+  // (T007, src/sim/resolve.ts) is meant to call it as step 1, ahead of resolveTurn —
+  // same category as turn.createColony/turn.resolveTurn just above, awaiting the same
+  // not-yet-built application layer. tests/integration/orders-turn-seam.test.ts proves
+  // it composes correctly with turn.ts today; it is not itself that production caller.
+  'orders.applyOrders',
   'world.generateWorld',
   'world.buildabilityScorerFor',
   'world.depositCoords',
@@ -74,11 +80,10 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   'scale.arealMassKg', // aic-ck0 / chain 1 berm cost
   'scale.arealDensityKgPerM2', // aic-ck0 / chain 1 berm cost
   'buildability.eligibleDepositKinds', // chains 2 and 3 deposit-gated siting
-  'construction.queueConstruction', // application layer places structures
+  // construction.queueConstruction/.enqueueProject/.cancelProject/.releaseTiles were
+  // here as "application layer places structures" — orders.ts (spec 005 T003) IS that
+  // application layer for these four now, so they were REMOVED rather than left stale.
   'construction.createProject',
-  'construction.enqueueProject',
-  'construction.cancelProject',
-  'construction.releaseTiles',
   'construction.occupiedTiles',
   'construction.requiredLabourHoursPerBuildTurn',
   'construction.totalLabourHoursRequired',
