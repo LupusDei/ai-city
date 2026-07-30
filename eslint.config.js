@@ -26,6 +26,9 @@ export default tseslint.config(
       'coverage/**',
       '.beads/**',
       '.scratch/**',
+      // See tsconfig: typechecked and linted by the acceptance project (aic-8tl.6),
+      // not here, because it imports @playwright/test.
+      'tests/acceptance/**',
     ],
   },
 

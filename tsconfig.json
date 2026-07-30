@@ -18,5 +18,11 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "*.config.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "*.config.ts"],
+  // The Playwright acceptance suite is excluded from the sim/unit typecheck because it
+  // imports @playwright/test, which is installed by aic-8tl.6 alongside its own
+  // tsconfig and runner. Including it here made `npm run verify` fail for EVERY agent
+  // the moment the spec landed (my error - the spec was pushed a commit ahead of its
+  // dependency). It gets typechecked by the acceptance project, not by this one.
+  "exclude": ["node_modules", "dist", "coverage", "tests/acceptance"]
 }
