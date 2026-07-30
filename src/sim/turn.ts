@@ -95,10 +95,11 @@ import {
   ELECTRICITY,
   electricityDrawWh,
   electricityLedgerPolicy,
-  electricityWh,
   resolveElectricity,
 } from './power'
 import type { ElectricityResult, GridParticipant } from './power'
+import { CALM_ENVIRONMENT, INITIAL_POWER_SOURCE_STATE, advancePowerSourceState, currentOutputWh } from './generation'
+import type { GenerationEnvironment, PowerSourceState } from './generation'
 
 /** Default grid size when a caller does not supply one: the 64x64 (320 m) ratified map. */
 const DEFAULT_GRID_DIMENSION = 64
@@ -140,6 +141,25 @@ export interface ColonyState {
    * the power path reads.
    */
   readonly offlineStructureIds: readonly string[]
+  /**
+   * Per-instance generation history, keyed by structure instance id (aic-a00.18) — see
+   * `generation.ts`'s module header for why this lives here rather than as a field on
+   * `ConstructionProject`: it is the SAME reasoning as `offlineStructureIds` just
+   * above, applied to a second world-level fact only the power path reads. A structure
+   * with no entry (never yet operated, or never a generator at all) is treated as
+   * `INITIAL_POWER_SOURCE_STATE` — see step 2 below — so this map only ever needs a
+   * key for an instance that has operated at least once.
+   */
+  readonly powerSourceState: Readonly<Record<string, PowerSourceState>>
+  /**
+   * Colony-wide conditions capable of modulating generation this turn (aic-a00.18) —
+   * see `generation.ts`'s `GenerationEnvironment`. Carried on state, not derived,
+   * because a dust-storm SCHEDULE is out of scope here (docs/turn-composition-audit.md
+   * E5's dust-storm PRNG stream does not exist yet); this field is the plumbing a
+   * future scheduler bead sets before calling `resolveTurn`, defaulting to
+   * `CALM_ENVIRONMENT` until one does.
+   */
+  readonly environment: GenerationEnvironment
 }
 
 /** The documented sub-step order, exported as data so it can be asserted, not just read. */
@@ -207,6 +227,10 @@ export interface CreateColonyOptions {
   readonly droneRoster?: readonly DroneId[]
   readonly stockpiles?: Stockpile
   readonly offlineStructureIds?: readonly string[]
+  /** Starting generation history, keyed by instance id. Defaults to `{}` — nobody has operated yet. */
+  readonly powerSourceState?: Readonly<Record<string, PowerSourceState>>
+  /** Starting colony-wide conditions. Defaults to `CALM_ENVIRONMENT`. */
+  readonly environment?: GenerationEnvironment
 }
 
 /**
@@ -256,6 +280,8 @@ export function createColony(
     droneRoster,
     stockpiles: options.stockpiles ?? {},
     offlineStructureIds: options.offlineStructureIds ?? [],
+    powerSourceState: options.powerSourceState ?? {},
+    environment: options.environment ?? CALM_ENVIRONMENT,
   }
 }
 
@@ -303,13 +329,47 @@ export function resolveTurn(state: ColonyState): TurnResolution {
   // ---------------------------------------------------------------------
   // STEP 2 — resolve the electricity grid against that frozen set
   // ---------------------------------------------------------------------
+  // `producesWh` is NOT a flat catalog read (aic-a00.18, fixed): `currentOutputWh`
+  // resolves each participant's OWN registered output curve against its history AS OF
+  // THE START of this turn (before step 2b advances it) and this turn's environment.
+  // A constant reactor's curve ignores both and returns its rated figure unchanged,
+  // which is what keeps this behaviour-preserving for every existing catalog entry.
   const participants: GridParticipant[] = state.queue.map((project) => ({
     id: project.id,
-    producesWh: electricityWh(project.structureType.produces),
+    producesWh: currentOutputWh(
+      project.structureType,
+      state.powerSourceState[project.id] ?? INITIAL_POWER_SOURCE_STATE,
+      state.environment,
+    ),
     consumesWh: electricityDrawWh(project.structureType, isInStandby(project)),
     priority: project.structureType.priorityClass,
     operating: operatingIds.has(project.id),
   }))
+
+  // ---------------------------------------------------------------------
+  // STEP 2b — advance each operating instance's generation history for NEXT turn
+  // ---------------------------------------------------------------------
+  // Computed from THIS turn's `operatingIds` (step 1), so a structure completed this
+  // very turn is not yet advanced — it had no history to advance, having just been
+  // read as `INITIAL_POWER_SOURCE_STATE` above. A structure not operating (still under
+  // construction, or offline) carries its existing history forward unchanged; see
+  // `generation.ts`'s `PowerSourceState` doc for why downtime does not accrue soiling
+  // in this model.
+  //
+  // Kept SPARSE deliberately — a project that has never yet operated gets no key at
+  // all, not an explicit `{ turnsOperated: 0 }` — matching `ColonyState.powerSourceState`'s
+  // own doc ("only ever needs a key for an instance that has operated at least once")
+  // and `offlineStructureIds`'s existing convention of listing only the exception, not
+  // every structure's default state.
+  const powerSourceState: Record<string, PowerSourceState> = {}
+  for (const project of state.queue) {
+    const previous = state.powerSourceState[project.id]
+    if (operatingIds.has(project.id)) {
+      powerSourceState[project.id] = advancePowerSourceState(previous ?? INITIAL_POWER_SOURCE_STATE)
+    } else if (previous !== undefined) {
+      powerSourceState[project.id] = previous
+    }
+  }
 
   const electricity = resolveElectricity({
     config,
@@ -412,6 +472,11 @@ export function resolveTurn(state: ColonyState): TurnResolution {
       droneRoster: state.droneRoster,
       stockpiles: ledger.stockpiles,
       offlineStructureIds: state.offlineStructureIds,
+      powerSourceState,
+      // Unchanged this turn: no dust-storm scheduler exists yet to move it (see the
+      // field's own doc on `ColonyState`). Carried forward so a future scheduler's
+      // write persists across turns exactly like every other piece of colony state.
+      environment: state.environment,
     },
     report: {
       turn: turnsTaken,

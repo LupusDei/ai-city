@@ -14,6 +14,7 @@
 
 import type { Coord } from './grid'
 import { MAX_GRID_DIMENSION } from './grid'
+import { mulberry32 } from './random'
 
 /**
  * A generated heightmap, row-major (`index = y * width + x`) to match `Grid`.
@@ -99,39 +100,6 @@ export function assertValidMapLatitude(value: number, label: string): void {
     throw new RangeError(
       `${label} must be a finite number of degrees in [-90, 90] (negative south), received: ${value}`,
     )
-  }
-}
-
-/**
- * mulberry32: a minimal 32-bit seeded PRNG.
- *
- * Chosen over `Math.random()` (unseedable, forbidden here) and over a
- * cryptographic RNG (unnecessary weight for terrain "flavour" randomness) because
- * it is ~5 lines, has no external dependency, and its output is fully determined
- * by the 32-bit seed and call count — exactly the byte-for-byte reproducibility
- * this module requires. It is not cryptographically secure, which is irrelevant
- * for generating a heightmap.
- *
- * Returns a closure over its internal state rather than a global generator so
- * that two calls to `generateTerrain` never share (and can never accidentally
- * mutate) each other's sequence.
- *
- * Exported so `buildability.ts` can key its own deterministic draws off the same
- * construction. It previously held a verbatim copy of this function purely
- * because this module did not export it; a second copy of a determinism
- * primitive is a copy that can drift, and a future reviewer auditing
- * reproducibility should have exactly one small algorithm to trust.
- */
-export function mulberry32(seed: number): () => number {
-  // `>>> 0` folds any finite number (including negatives) into an unsigned
-  // 32-bit integer, which is the state mulberry32 operates on.
-  let state = seed >>> 0
-  return function next(): number {
-    state = (state + 0x6d2b79f5) | 0
-    let t = state
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
 

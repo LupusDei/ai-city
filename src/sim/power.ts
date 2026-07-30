@@ -151,12 +151,21 @@ export const ELECTRICITY = 'electricity'
  * is the project's reality-grounded baseline; do not replace it with a
  * differently-sourced figure without updating this citation.
  *
- * An AUTHORING INPUT, not something the sim reads per turn. Generation comes from each
- * generator's `produces.electricity` catalog entry — see `resolveElectricity`. The
- * previous design summed `reactorCount * REACTOR_OUTPUT_KW` in code, which could not
- * express a second reactor type at all and flatly could not express spec 003's solar
- * arrays, whose output decays with soiling and dust storms (audit E1). A catalog
- * author converts this figure once, with `energyPerTurnWh`.
+ * An AUTHORING INPUT, not something the sim reads per turn. A catalog author converts
+ * this figure once, with `energyPerTurnWh`, into `produces.electricity` — the RATED
+ * (peak, nameplate) output this reactor type declares.
+ *
+ * That rated figure is no longer what `turn.ts` reads per turn, though: this module's
+ * own `GridParticipant.producesWh` is filled in by `generation.ts`'s `currentOutputWh`,
+ * which resolves the rated figure through a REGISTERED CURVE
+ * (`StructureType.powerOutputModel`) before it ever reaches `resolveElectricity` here.
+ * A `REACTOR_OUTPUT_WATTS` reactor gets the `constant` curve by default — output equal
+ * to rated, forever, exactly the old `reactorCount * REACTOR_OUTPUT_KW` behaviour — but
+ * the SAME seam also carries spec 003's solar arrays, whose output decays with soiling
+ * and dust storms, and any future source kind, entirely as catalog data plus a
+ * registered curve (aic-a00.18, closing audit E1). See `generation.ts`'s module header
+ * for the full design; this module still owns the grid — generation, demand and the
+ * brownout — and knows nothing about WHICH curve produced the number it was handed.
  */
 export const REACTOR_OUTPUT_WATTS = 40_000
 
@@ -310,8 +319,13 @@ export function electricityLedgerPolicy(storageCapacity: Stockpile = {}): Ledger
  *
  * Both energy figures are TURN-CAPACITY watt-hours — see the module header. For a
  * continuously-drawing structure that is identical to its per-turn energy, so a caller
- * passes `electricityWh(type.produces)` and `electricityDrawWh(type, standby)` straight
- * through with no conversion.
+ * passes `electricityDrawWh(type, standby)` straight through with no conversion on the
+ * demand side. `producesWh` is the one figure this module does NOT compute for the
+ * caller: `turn.ts` fills it in from `generation.ts`'s `currentOutputWh(type, state,
+ * environment)`, which resolves the catalog's rated `produces.electricity` through a
+ * registered curve — a constant reactor's curve happens to return that rated figure
+ * unchanged, which is why this field's SHAPE (a bare integer) never had to change for
+ * `generation.ts` to exist (aic-a00.18).
  */
 export interface GridParticipant {
   /** The structure INSTANCE id. Non-empty, and unique across participants AND drones. */

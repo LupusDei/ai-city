@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AI City — First Light: turning the engine into a game someone can lose</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  /* DARK token set — the default. AA contrast against the dark surfaces below. */
+  .proposal-root {
+    --page-bg: #0d1117;
+    --doc-bg: #161b22;
+    --doc-border: #30363d;
+    --text: #e6edf3;
+    --heading: #f0f6fc;
+    --muted: #9da7b3;
+    --rule: #30363d;
+    --link: #79c0ff;
+    --code-bg: #1f2630;
+    --code-text: #e6edf3;
+    --pre-bg: #010409;
+    --pre-text: #e6edf3;
+    --quote-text: #b3bcc7;
+    --th-bg: #1f2630;
+    --toggle-bg: #21262d;
+    --toggle-border: #30363d;
+    --toggle-text: #e6edf3;
+    --focus: #79c0ff;
+  }
+
+  /* LIGHT token set — applied when the OS prefers light, OR (below) when toggled. */
+  @media (prefers-color-scheme: light) {
+    .proposal-root {
+      --page-bg: #f6f8fa;
+      --doc-bg: #ffffff;
+      --doc-border: #d0d7de;
+      --text: #1f2328;
+      --heading: #11161c;
+      --muted: #57606a;
+      --rule: #eaecef;
+      --link: #0969da;
+      --code-bg: #eff1f3;
+      --code-text: #1f2328;
+      --pre-bg: #1f2328;
+      --pre-text: #f6f8fa;
+      --quote-text: #57606a;
+      --th-bg: #f6f8fa;
+      --toggle-bg: #ffffff;
+      --toggle-border: #d0d7de;
+      --toggle-text: #1f2328;
+      --focus: #0969da;
+    }
+  }
+
+  /* Manual override: checking the toggle forces the LIGHT token set regardless of OS.
+     Authored last + sibling-scoped so the explicit user choice beats the media query. */
+  .proposal-doc__theme-input:checked ~ .proposal-root {
+    --page-bg: #f6f8fa;
+    --doc-bg: #ffffff;
+    --doc-border: #d0d7de;
+    --text: #1f2328;
+    --heading: #11161c;
+    --muted: #57606a;
+    --rule: #eaecef;
+    --link: #0969da;
+    --code-bg: #eff1f3;
+    --code-text: #1f2328;
+    --pre-bg: #1f2328;
+    --pre-text: #f6f8fa;
+    --quote-text: #57606a;
+    --th-bg: #f6f8fa;
+    --toggle-bg: #ffffff;
+    --toggle-border: #d0d7de;
+    --toggle-text: #1f2328;
+    --focus: #0969da;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-text-size-adjust: 100%;
+  }
+  .proposal-root {
+    min-height: 100vh;
+    background: var(--page-bg);
+    color: var(--text);
+  }
+
+  /* The hidden checkbox driving the CSS-only toggle. Kept off-screen (not display:none)
+     so it stays reachable by keyboard/AT; the visible affordance is its <label>. */
+  .proposal-doc__theme-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .proposal-doc__theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--toggle-border);
+    border-radius: 999px;
+    background: var(--toggle-bg);
+    color: var(--toggle-text);
+  }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--light { display: none; }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--dark { display: inline; }
+  /* When toggled to light, show the ☀ affordance (and vice-versa). */
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--dark { display: none; }
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--light { display: inline; }
+  /* Visible focus ring for keyboard users (the toggle is the only interactive control). */
+  .proposal-doc__theme-input:focus-visible ~ .proposal-root .proposal-doc__theme-toggle,
+  .proposal-doc__theme-toggle:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .proposal-doc {
+    max-width: 46rem;
+    margin: 2.5rem auto;
+    padding: 2.5rem 3rem;
+    background: var(--doc-bg);
+    border: 1px solid var(--doc-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(1, 4, 9, 0.4);
+  }
+  .proposal-doc h1, .proposal-doc h2, .proposal-doc h3,
+  .proposal-doc h4, .proposal-doc h5, .proposal-doc h6 {
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+    font-weight: 600;
+    color: var(--heading);
+  }
+  .proposal-doc h1 { font-size: 2rem; margin-top: 0; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc h2 { font-size: 1.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc p, .proposal-doc ul, .proposal-doc ol, .proposal-doc blockquote, .proposal-doc table {
+    margin: 0 0 1rem;
+  }
+  .proposal-doc a { color: var(--link); text-decoration: none; }
+  .proposal-doc a:hover { text-decoration: underline; }
+  .proposal-doc a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+  .proposal-doc code, .proposal-doc pre, .proposal-doc kbd, .proposal-doc samp {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .proposal-doc code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .proposal-doc pre {
+    background: var(--pre-bg);
+    color: var(--pre-text);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow: auto;
+  }
+  .proposal-doc pre code { background: transparent; padding: 0; color: inherit; }
+  .proposal-doc blockquote {
+    margin-left: 0;
+    padding: 0.2em 1rem;
+    color: var(--quote-text);
+    border-left: 0.25em solid var(--doc-border);
+  }
+  .proposal-doc table { border-collapse: collapse; width: 100%; }
+  .proposal-doc th, .proposal-doc td { border: 1px solid var(--doc-border); padding: 0.5em 0.75em; text-align: left; }
+  .proposal-doc th { background: var(--th-bg); font-weight: 600; }
+  .proposal-doc img, .proposal-doc svg { max-width: 100%; height: auto; }
+  .proposal-doc hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .proposal-doc__header { margin-bottom: 1.5rem; }
+  .proposal-doc__title { font-size: 2rem; font-weight: 600; margin: 0; color: var(--heading); }
+  .proposal-doc__meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .proposal-doc__theme-toggle { transition: background 0.15s ease, color 0.15s ease; }
+  }
+</style>
+</head>
+<body>
+<input type="checkbox" id="proposal-theme-toggle" class="proposal-doc__theme-input" aria-label="Toggle light or dark theme">
+<div class="proposal-root">
+<label for="proposal-theme-toggle" class="proposal-doc__theme-toggle">
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--dark" aria-hidden="true">☾</span>
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--light" aria-hidden="true">☀</span>
+<span>Theme</span>
+</label>
+<main class="proposal-doc">
+<header class="proposal-doc__header">
+<h1 class="proposal-doc__title">AI City — First Light: turning the engine into a game someone can lose</h1>
+<div class="proposal-doc__meta">product proposal</div>
+</header>
+<article>
+<style>
+  :root {
+    --bg:#17120F; --surface:#211A16; --surface-2:#2B221C;
+    --ink:#EFE5DB; --ink-soft:#B3A296; --rule:#3C3129;
+    --iron:#E88055; --inst:#79BDD8; --amber:#E3AB55; --good:#8CC182; --bad:#E0736B;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#F2EBE4; --surface:#FBF7F2; --surface-2:#E8DFD6;
+      --ink:#241C17; --ink-soft:#665950; --rule:#D9CDC2;
+      --iron:#A33C1B; --inst:#1B5E78; --amber:#8A5D0C; --good:#3D6B38; --bad:#A33C33;
+    }
+  }
+  .doc { background:var(--bg); color:var(--ink);
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size:17px; line-height:1.65; padding:2.5rem 1.5rem 4rem; margin:0; }
+  .doc-inner { max-width:52rem; margin:0 auto; }
+  .doc h1,.doc h2,.doc h3 { line-height:1.15; text-wrap:balance; margin:0 0 .5rem; }
+  .doc h1 { font-size:2.35rem; letter-spacing:-.02em; }
+  .doc h2 { font-size:1.5rem; letter-spacing:-.015em; margin-top:2.75rem;
+    padding-top:.9rem; border-top:2px solid var(--iron); }
+  .doc h3 { font-size:1.1rem; margin-top:1.6rem; }
+  .doc p,.doc ul,.doc ol { margin:0 0 1rem; }
+  .eyebrow { font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--ink-soft); margin:0 0 .35rem; }
+  .lede { font-size:1.2rem; line-height:1.5; }
+  .doc blockquote { margin:1.5rem 0; padding:.15rem 0 .15rem 1.25rem;
+    border-left:3px solid var(--iron); }
+  .doc blockquote.inst { border-left-color:var(--inst); }
+  .table-wrap { overflow-x:auto; margin:1.25rem 0; }
+  .doc table { border-collapse:collapse; width:100%; font-size:.92rem; min-width:30rem; }
+  .doc th,.doc td { text-align:left; padding:.5rem .9rem .5rem 0;
+    border-bottom:1px solid var(--rule); vertical-align:top; }
+  .doc th { font-family: ui-monospace, Menlo, monospace; font-size:.7rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); font-weight:400; }
+  .tag { display:inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:.1rem .45rem; border:1px solid currentColor; white-space:nowrap; }
+  .c-bad{color:var(--bad);} .c-good{color:var(--good);} .c-amber{color:var(--amber);}
+  .c-inst{color:var(--inst);} .c-iron{color:var(--iron);}
+  .doc ul { padding-left:1.15rem; } .doc li { margin-bottom:.5rem; }
+  .doc li::marker { color:var(--iron); }
+  .masthead { border-bottom:2px solid var(--ink); padding-bottom:1.5rem; }
+  .tier { border:1px solid var(--rule); background:var(--surface); padding:1rem 1.15rem;
+    margin:1rem 0; }
+  .tier .n { font-family: ui-monospace, Menlo, monospace; font-size:.7rem;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--iron); }
+  .phase { display:grid; grid-template-columns:2.2rem 1fr; gap:.9rem; margin:.85rem 0; }
+  .phase .num { font-family: ui-monospace, Menlo, monospace; font-size:1.15rem;
+    color:var(--iron); line-height:1.3; }
+  .footer { margin-top:3rem; padding-top:1rem; border-top:2px solid var(--ink);
+    font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between; }
+  .figure { margin:1.5rem 0; }
+  .figure svg { display:block; width:100%; height:auto; background:var(--surface-2);
+    border:1px solid var(--rule); }
+  .figcap { font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    color:var(--ink-soft); margin-top:.45rem; }
+  .s-lbl { font-family: ui-monospace, Menlo, monospace; font-size:10px; letter-spacing:.06em; }
+</style>
+
+<div class="doc"><div class="doc-inner">
+
+  <header class="masthead">
+    <p class="eyebrow">Proposal · Next Major Epic</p>
+    <h1>First Light</h1>
+    <p class="lede">We have built an excellent simulation engine, and we have not built a game.
+    923 tests at ~100% coverage prove the physics are right. <strong>Nobody can play it.</strong></p>
+  </header>
+
+  <h2>The finding</h2>
+  <p>This is not "the UI is rough." There is no entry point, no way to start a game, and
+  <strong>no game content outside test fixtures</strong>. Every structure roster in this
+  project — habitat, reactor, hopper, press — exists only as a fixture inside a test file.
+  We have the nouns of the game written down nowhere a player could ever reach them.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Check</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Entry point / UI</td><td><span class="tag c-bad">None</span> no index.html, no src/ui, no bundler config</td></tr>
+        <tr><td>Can the game start?</td><td><span class="tag c-bad">No</span> evaluateLanding has zero production consumers</td></tr>
+        <tr><td>Production game content</td><td><span class="tag c-bad">None</span> every roster lives in a test fixture</td></tr>
+        <tr><td>Dust storms</td><td><span class="tag c-amber">Inert</span> plumbed through generation; nothing schedules one</td></tr>
+        <tr><td>Save / load</td><td><span class="tag c-bad">None</span> for a 278-turn session</td></tr>
+        <tr><td>Pacing</td><td><span class="tag c-bad">None</span> 278 manual turns, no fast-forward</td></tr>
+        <tr><td>Balance pass</td><td><span class="tag c-amber">Never run</span> the race is untuned</td></tr>
+        <tr><td>Simulation core</td><td><span class="tag c-good">Excellent</span> deterministic, golden-trace locked, extensible</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <blockquote>
+    <p>The engine work was not wasted — it is the foundation, and it is genuinely good.
+    But <strong>a simulation nobody can start is not a game.</strong></p>
+  </blockquote>
+
+  <h2>Three tiers of missing</h2>
+
+  <div class="tier">
+    <p class="n">Tier 1 — Playable</p>
+    <p>Can a human start it and reach turn 278? Needs a content roster, a new-game flow,
+    a renderer, the three screens, input wiring, save/load, and pacing.</p>
+  </div>
+  <div class="tier">
+    <p class="n">Tier 2 — Legible</p>
+    <p>Can they understand <em>why</em> they are losing? <code>CycleReport</code> already
+    carries the cut line and the shed rationale. Nothing surfaces it. The power-versus-labour
+    death spiral is the heart of the design and is currently <strong>invisible</strong>.</p>
+  </div>
+  <div class="tier">
+    <p class="n">Tier 3 — Fun</p>
+    <p>Do they want to play again? A tuned difficulty curve, an environment that does
+    something, a recovery mechanic so a bad turn 90 is not a silent 180-turn loss, and an
+    ending worth reaching.</p>
+  </div>
+
+  <h2>The shape of the gap</h2>
+  <div class="figure">
+    <svg viewBox="0 0 720 180" role="img" aria-label="The simulation core is complete; content, interface, pacing and balance are absent between it and a player.">
+      <rect x="0" y="0" width="720" height="180" fill="none"></rect>
+      <rect x="12" y="46" width="150" height="90" fill="#8CC182"></rect>
+      <text x="87" y="86" class="s-lbl" fill="#17120F" text-anchor="middle">SIM CORE</text>
+      <text x="87" y="102" class="s-lbl" fill="#17120F" text-anchor="middle">923 TESTS</text>
+      <text x="87" y="118" class="s-lbl" fill="#17120F" text-anchor="middle">DONE</text>
+
+      <g fill="none" stroke="#E0736B" stroke-width="2" stroke-dasharray="6 4">
+        <rect x="186" y="46" width="120" height="90"></rect>
+        <rect x="330" y="46" width="120" height="90"></rect>
+        <rect x="474" y="46" width="120" height="90"></rect>
+      </g>
+      <g class="s-lbl" fill="#E0736B" text-anchor="middle">
+        <text x="246" y="86">CONTENT</text><text x="246" y="102">(fixtures only)</text>
+        <text x="390" y="86">INTERFACE</text><text x="390" y="102">(none)</text>
+        <text x="534" y="86">PACING +</text><text x="534" y="102">BALANCE (none)</text>
+      </g>
+      <rect x="618" y="46" width="90" height="90" fill="#2B221C" stroke="#B3A296"></rect>
+      <text x="663" y="94" class="s-lbl" fill="#B3A296" text-anchor="middle">PLAYER</text>
+      <text x="12" y="28" class="s-lbl" fill="#B3A296">WHAT EXISTS</text>
+      <text x="708" y="28" class="s-lbl" fill="#B3A296" text-anchor="end">WHAT DOES NOT</text>
+      <text x="360" y="164" class="s-lbl" fill="#B3A296" text-anchor="middle">THREE MISSING LAYERS BETWEEN A CORRECT SIMULATION AND A GAME</text>
+    </svg>
+    <p class="figcap">Fig 1 — The engine is complete. Nothing connects it to a person.</p>
+  </div>
+
+  <h2>Comparison with Raynor's work</h2>
+  <p>Raynor has three resource-chain epics planned and correctly dependency-gated —
+  <strong>Regolith → Shielded Habitat</strong>, <strong>Silica → Solar</strong>,
+  <strong>Ice → Air → Life Support</strong>. Roughly 92 beads, well specified, no competing
+  roots, nothing startable before its prerequisites. The planning is sound.</p>
+  <p><strong>They are the right work in the wrong order.</strong></p>
+  <ul>
+    <li>They add <strong>depth to a game nobody can play yet</strong>. Depth is only felt through play.</li>
+    <li>They would be <strong>balanced blind</strong>. Tuning a silicon furnace against a loop no human has ever run is guesswork with a test suite attached.</li>
+    <li><strong>His own gating already says this.</strong> The chains are the accepted proposal's deferred backlog, conditional on the core loop being fun — and that condition has never been evaluated, because the loop has never been played.</li>
+  </ul>
+  <blockquote class="inst">
+    <p>Nothing here is wasted. First Light gives the chains <strong>a place to land and a way
+    to measure them</strong>. Afterwards, "is the silicon detour worth 18 turns?" is a question
+    we can <em>answer</em> rather than estimate.</p>
+  </blockquote>
+
+  <h2>The epic</h2>
+
+  <div class="phase"><div class="num">1</div><div>
+    <strong>Vocabulary.</strong> A real production structure roster in <code>src/</code>,
+    not test fixtures. The game's actual nouns, authored as data.</div></div>
+  <div class="phase"><div class="num">2</div><div>
+    <strong>Start.</strong> Bootstrap landing → colony, and a new-game flow that ends with
+    a colony on screen. Currently in flight as <code>aic-hfb</code>.</div></div>
+  <div class="phase"><div class="num">3</div><div>
+    <strong>See.</strong> Canvas grid renderer plus the survey, operations and cycle-report
+    screens. Gated on the React toolchain already in progress.</div></div>
+  <div class="phase"><div class="num">4</div><div>
+    <strong>Play.</strong> Input → typed orders (<code>applyOrders</code> already exists and
+    is tested), fast-forward to next event, and save/load. <em>278 manual turns is not a
+    session; it is an endurance test.</em></div></div>
+  <div class="phase"><div class="num">5</div><div>
+    <strong>Drama.</strong> An event scheduler so dust storms actually occur. The
+    environment is already plumbed and inert — making it live costs little and changes the
+    texture of every game.</div></div>
+  <div class="phase"><div class="num">6</div><div>
+    <strong>Tune.</strong> A balance pass driven by the headless runner. The death spiral
+    must be <strong>reachable and recoverable if caught early</strong> — reachable or it is
+    not a game, recoverable or it is a punishment.</div></div>
+  <div class="phase"><div class="num">7</div><div>
+    <strong>Land.</strong> End-game presentation, and a first-five-turns onboarding that
+    teaches by playing rather than by explaining.</div></div>
+
+  <h2>Success criteria</h2>
+  <blockquote>
+    <p>A person who has never seen this can sit down, found a colony, feel the
+    power-versus-labour squeeze, lose, understand exactly why, and immediately want
+    another go.</p>
+  </blockquote>
+  <p>Measured by an actual playtest, not asserted. Plus the engineering floor that already
+  holds: determinism intact, golden trace passing, gates green.</p>
+
+  <h2>Recommendation</h2>
+  <p>Build <strong>First Light</strong> next. Hold the chains at their current gate. Then
+  re-read the accepted proposal's own condition — <em>"do not build these until the core
+  loop is fun"</em> — with evidence in hand instead of intuition.</p>
+
+  <div class="footer">
+    <span>AI City · First Light</span>
+    <span>Stetmann · Research Engineering</span>
+  </div>
+
+</div></div>
+</article>
+</main>
+</div>
+</body>
+</html>

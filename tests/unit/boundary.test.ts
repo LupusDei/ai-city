@@ -496,6 +496,111 @@ describe('sim/renderer boundary enforcement', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Single source of truth: mulberry32 must not be duplicated (aic-a00.15)
+// ---------------------------------------------------------------------------
+
+/**
+ * `aic-a00.15`: mulberry32 was independently implemented in BOTH `terrain.ts`
+ * and `buildability.ts`, because `terrain.ts` did not export it and the
+ * buildability work was correctly forbidden from editing another module's
+ * file. Two copies of a determinism primitive is a determinism HAZARD, not
+ * just duplication: `generateTerrain` and `generateDeposits` both key off
+ * `terrain.seed`, and they only stay in register with each other — deposits
+ * landing where the terrain review actually expects them — if both resolve to
+ * IDENTICAL code. Editing one copy in isolation silently desyncs deposits from
+ * the terrain they sit on, and that failure reads as "the map looks wrong", not
+ * as a code defect; a golden-trace regression would happily bake in whichever
+ * pair of copies existed when it was recorded.
+ *
+ * `src/sim/random.ts` now holds the one implementation. This block is what
+ * makes that a structural property instead of a comment someone has to
+ * remember: it fails the moment a second PRNG implementation appears anywhere
+ * else under `src/sim/`.
+ *
+ * Two independent signals are checked, because either alone is dodgeable:
+ *   - a NAME check (function/const literally called `mulberry32`) — dodged by
+ *     a duplicate that renames the function but keeps the algorithm;
+ *   - a FINGERPRINT check (the `0x6d2b79f5` mixing constant, unique to this
+ *     specific PRNG's odd-increment step) — dodged by a duplicate that keeps
+ *     the name `mulberry32` but reimplements the body differently.
+ * A "duplicate" that changes both the name and the algorithm is not a
+ * duplicate of THIS primitive any more — that is a new, separate PRNG, which
+ * is a design decision for a human to make consciously, not something this
+ * mechanical check should silently wave through OR silently block.
+ */
+describe('single source of truth: mulberry32 (aic-a00.15)', () => {
+  const simFiles = listSourceFiles(SIM_ROOT)
+
+  interface NameHit {
+    readonly file: string
+    readonly line: number
+  }
+
+  /** Every occurrence of `pattern` in `file`'s code (comments stripped, strings kept — a
+   * function definition is real code, never a string literal, so masking strings too
+   * would risk nothing here but is deliberately skipped to keep this check simple). */
+  function findDefinitions(pattern: RegExp): NameHit[] {
+    const hits: NameHit[] = []
+    for (const file of simFiles) {
+      const source = readFileSync(file, 'utf8')
+      const commentsOnly = mask(source, false)
+      const lineStarts = buildLineStarts(source)
+      const regex = new RegExp(pattern.source, 'g')
+      let m: RegExpExecArray | null
+      while ((m = regex.exec(commentsOnly)) !== null) {
+        hits.push({ file: relative(SIM_ROOT, file), line: lineForIndex(lineStarts, m.index) })
+        if (m.index === regex.lastIndex) regex.lastIndex++
+      }
+    }
+    return hits
+  }
+
+  function formatHits(hits: readonly NameHit[]): string {
+    return hits.map((h) => `  ${h.file}:${h.line}`).join('\n')
+  }
+
+  it('should define something named "mulberry32" in exactly one place under src/sim/: random.ts', () => {
+    // Matches a function DECLARATION or a const/let/var ASSIGNMENT named
+    // mulberry32 — i.e. where it is DEFINED — deliberately not a bare call like
+    // `mulberry32(seed)`, which every legitimate importer (terrain.ts,
+    // buildability.ts) also contains and which must NOT count as a duplicate.
+    const definitions = findDefinitions(
+      /\bfunction\s+mulberry32\s*\(|\b(?:const|let|var)\s+mulberry32\s*=/,
+    )
+    if (definitions.length !== 1 || definitions[0]?.file !== 'random.ts') {
+      throw new Error(
+        `Expected exactly one definition of "mulberry32" under src/sim/, in random.ts. Found ` +
+          `${definitions.length}:\n${formatHits(definitions)}\n\n` +
+          'A second definition is the exact determinism hazard aic-a00.15 fixed: terrain ' +
+          'generation and mineral-deposit placement both key off terrain.seed and only stay ' +
+          'in register if they share ONE PRNG implementation. Import from src/sim/random.ts ' +
+          'instead of redefining it.',
+      )
+    }
+    expect(definitions).toEqual([{ file: 'random.ts', line: expect.any(Number) }])
+  })
+
+  it('should contain the mulberry32 mixing constant 0x6d2b79f5 in exactly one place under src/sim/: random.ts', () => {
+    // Independent of naming: even a renamed clone of this algorithm keeps its
+    // magic odd increment constant (mulberry32's defining characteristic)
+    // unless it is rewritten from scratch, in which case it is a different PRNG
+    // and this repo's determinism story needs a human decision, not a silent
+    // pass or a silent duplicate.
+    const fingerprints = findDefinitions(/0x6d2b79f5/)
+    if (fingerprints.length !== 1 || fingerprints[0]?.file !== 'random.ts') {
+      throw new Error(
+        `Expected the mulberry32 mixing constant 0x6d2b79f5 to appear in exactly one place ` +
+          `under src/sim/, in random.ts. Found ${fingerprints.length}:\n${formatHits(fingerprints)}\n\n` +
+          'A second occurrence means the mulberry32 algorithm itself has been duplicated ' +
+          '(possibly under a different name) — the same aic-a00.15 hazard, dodging only the ' +
+          'name-based check above.',
+      )
+    }
+    expect(fingerprints).toEqual([{ file: 'random.ts', line: expect.any(Number) }])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Documents the intended state: the currently-shipped sim files pass individually
 // ---------------------------------------------------------------------------
 

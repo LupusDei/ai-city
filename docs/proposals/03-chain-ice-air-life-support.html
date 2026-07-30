@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AI City — Resource Chain 3 of 3: Ice, Air and the Provisioned Habitat (Ice → Electrolysis → Life Support)</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  /* DARK token set — the default. AA contrast against the dark surfaces below. */
+  .proposal-root {
+    --page-bg: #0d1117;
+    --doc-bg: #161b22;
+    --doc-border: #30363d;
+    --text: #e6edf3;
+    --heading: #f0f6fc;
+    --muted: #9da7b3;
+    --rule: #30363d;
+    --link: #79c0ff;
+    --code-bg: #1f2630;
+    --code-text: #e6edf3;
+    --pre-bg: #010409;
+    --pre-text: #e6edf3;
+    --quote-text: #b3bcc7;
+    --th-bg: #1f2630;
+    --toggle-bg: #21262d;
+    --toggle-border: #30363d;
+    --toggle-text: #e6edf3;
+    --focus: #79c0ff;
+  }
+
+  /* LIGHT token set — applied when the OS prefers light, OR (below) when toggled. */
+  @media (prefers-color-scheme: light) {
+    .proposal-root {
+      --page-bg: #f6f8fa;
+      --doc-bg: #ffffff;
+      --doc-border: #d0d7de;
+      --text: #1f2328;
+      --heading: #11161c;
+      --muted: #57606a;
+      --rule: #eaecef;
+      --link: #0969da;
+      --code-bg: #eff1f3;
+      --code-text: #1f2328;
+      --pre-bg: #1f2328;
+      --pre-text: #f6f8fa;
+      --quote-text: #57606a;
+      --th-bg: #f6f8fa;
+      --toggle-bg: #ffffff;
+      --toggle-border: #d0d7de;
+      --toggle-text: #1f2328;
+      --focus: #0969da;
+    }
+  }
+
+  /* Manual override: checking the toggle forces the LIGHT token set regardless of OS.
+     Authored last + sibling-scoped so the explicit user choice beats the media query. */
+  .proposal-doc__theme-input:checked ~ .proposal-root {
+    --page-bg: #f6f8fa;
+    --doc-bg: #ffffff;
+    --doc-border: #d0d7de;
+    --text: #1f2328;
+    --heading: #11161c;
+    --muted: #57606a;
+    --rule: #eaecef;
+    --link: #0969da;
+    --code-bg: #eff1f3;
+    --code-text: #1f2328;
+    --pre-bg: #1f2328;
+    --pre-text: #f6f8fa;
+    --quote-text: #57606a;
+    --th-bg: #f6f8fa;
+    --toggle-bg: #ffffff;
+    --toggle-border: #d0d7de;
+    --toggle-text: #1f2328;
+    --focus: #0969da;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-text-size-adjust: 100%;
+  }
+  .proposal-root {
+    min-height: 100vh;
+    background: var(--page-bg);
+    color: var(--text);
+  }
+
+  /* The hidden checkbox driving the CSS-only toggle. Kept off-screen (not display:none)
+     so it stays reachable by keyboard/AT; the visible affordance is its <label>. */
+  .proposal-doc__theme-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .proposal-doc__theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--toggle-border);
+    border-radius: 999px;
+    background: var(--toggle-bg);
+    color: var(--toggle-text);
+  }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--light { display: none; }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--dark { display: inline; }
+  /* When toggled to light, show the ☀ affordance (and vice-versa). */
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--dark { display: none; }
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--light { display: inline; }
+  /* Visible focus ring for keyboard users (the toggle is the only interactive control). */
+  .proposal-doc__theme-input:focus-visible ~ .proposal-root .proposal-doc__theme-toggle,
+  .proposal-doc__theme-toggle:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .proposal-doc {
+    max-width: 46rem;
+    margin: 2.5rem auto;
+    padding: 2.5rem 3rem;
+    background: var(--doc-bg);
+    border: 1px solid var(--doc-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(1, 4, 9, 0.4);
+  }
+  .proposal-doc h1, .proposal-doc h2, .proposal-doc h3,
+  .proposal-doc h4, .proposal-doc h5, .proposal-doc h6 {
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+    font-weight: 600;
+    color: var(--heading);
+  }
+  .proposal-doc h1 { font-size: 2rem; margin-top: 0; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc h2 { font-size: 1.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc p, .proposal-doc ul, .proposal-doc ol, .proposal-doc blockquote, .proposal-doc table {
+    margin: 0 0 1rem;
+  }
+  .proposal-doc a { color: var(--link); text-decoration: none; }
+  .proposal-doc a:hover { text-decoration: underline; }
+  .proposal-doc a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+  .proposal-doc code, .proposal-doc pre, .proposal-doc kbd, .proposal-doc samp {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .proposal-doc code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .proposal-doc pre {
+    background: var(--pre-bg);
+    color: var(--pre-text);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow: auto;
+  }
+  .proposal-doc pre code { background: transparent; padding: 0; color: inherit; }
+  .proposal-doc blockquote {
+    margin-left: 0;
+    padding: 0.2em 1rem;
+    color: var(--quote-text);
+    border-left: 0.25em solid var(--doc-border);
+  }
+  .proposal-doc table { border-collapse: collapse; width: 100%; }
+  .proposal-doc th, .proposal-doc td { border: 1px solid var(--doc-border); padding: 0.5em 0.75em; text-align: left; }
+  .proposal-doc th { background: var(--th-bg); font-weight: 600; }
+  .proposal-doc img, .proposal-doc svg { max-width: 100%; height: auto; }
+  .proposal-doc hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .proposal-doc__header { margin-bottom: 1.5rem; }
+  .proposal-doc__title { font-size: 2rem; font-weight: 600; margin: 0; color: var(--heading); }
+  .proposal-doc__meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .proposal-doc__theme-toggle { transition: background 0.15s ease, color 0.15s ease; }
+  }
+</style>
+</head>
+<body>
+<input type="checkbox" id="proposal-theme-toggle" class="proposal-doc__theme-input" aria-label="Toggle light or dark theme">
+<div class="proposal-root">
+<label for="proposal-theme-toggle" class="proposal-doc__theme-toggle">
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--dark" aria-hidden="true">☾</span>
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--light" aria-hidden="true">☀</span>
+<span>Theme</span>
+</label>
+<main class="proposal-doc">
+<header class="proposal-doc__header">
+<h1 class="proposal-doc__title">AI City — Resource Chain 3 of 3: Ice, Air and the Provisioned Habitat (Ice → Electrolysis → Life Support)</h1>
+<div class="proposal-doc__meta">product proposal</div>
+</header>
+<article>
+<style>
+  :root {
+    --bg:#17120F; --surface:#211A16; --surface-2:#2B221C;
+    --ink:#EFE5DB; --ink-soft:#B3A296; --rule:#3C3129;
+    --iron:#E88055; --inst:#79BDD8; --amber:#E3AB55; --good:#8CC182;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#F2EBE4; --surface:#FBF7F2; --surface-2:#E8DFD6;
+      --ink:#241C17; --ink-soft:#665950; --rule:#D9CDC2;
+      --iron:#A33C1B; --inst:#1B5E78; --amber:#8A5D0C; --good:#3D6B38;
+    }
+  }
+  .doc {
+    background:var(--bg); color:var(--ink);
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size:17px; line-height:1.65;
+    padding:2.5rem 1.5rem 4rem; margin:0;
+  }
+  .doc-inner { max-width:52rem; margin:0 auto; }
+  .doc h1, .doc h2, .doc h3 { line-height:1.15; text-wrap:balance; margin:0 0 .5rem; }
+  .doc h1 { font-size:2.4rem; letter-spacing:-.02em; }
+  .doc h2 {
+    font-size:1.55rem; letter-spacing:-.015em; margin-top:3rem;
+    padding-top:.9rem; border-top:2px solid var(--iron);
+  }
+  .doc h3 { font-size:1.15rem; margin-top:1.75rem; }
+  .doc p, .doc ul, .doc ol { margin:0 0 1rem; }
+  .doc a { color:var(--inst); }
+  .doc a:focus-visible, .doc :focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-soft); margin:0 0 .35rem;
+  }
+  .lede { font-size:1.22rem; line-height:1.5; color:var(--ink); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric:tabular-nums; }
+  .doc blockquote {
+    margin:1.5rem 0; padding:.15rem 0 .15rem 1.25rem;
+    border-left:3px solid var(--iron); color:var(--ink);
+  }
+  .doc blockquote.inst { border-left-color:var(--inst); }
+  .doc blockquote.amber { border-left-color:var(--amber); }
+  .figure { margin:1.75rem 0; }
+  .figure svg { display:block; width:100%; height:auto; background:var(--surface); border:1px solid var(--rule); }
+  .figcap {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.74rem; letter-spacing:.06em; color:var(--ink-soft);
+    margin-top:.5rem; line-height:1.5;
+  }
+  .table-wrap { overflow-x:auto; margin:1.25rem 0; }
+  .doc table { border-collapse:collapse; width:100%; font-size:.92rem; min-width:30rem; }
+  .doc th, .doc td { text-align:left; padding:.5rem .9rem .5rem 0; border-bottom:1px solid var(--rule); vertical-align:top; }
+  .doc th {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); font-weight:400;
+  }
+  .doc td.num { font-family: ui-monospace, Menlo, monospace; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stats { display:flex; flex-wrap:wrap; gap:1.5rem; margin:1.25rem 0; }
+  .stat { display:flex; flex-direction:column; }
+  .stat b {
+    font-family: ui-monospace, Menlo, monospace; font-size:1.7rem;
+    font-weight:600; letter-spacing:-.02em; line-height:1.15;
+  }
+  .stat span {
+    font-family: ui-monospace, Menlo, monospace; font-size:.7rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+  }
+  .c-iron { color:var(--iron); } .c-inst { color:var(--inst); } .c-good { color:var(--good); } .c-amber { color:var(--amber); }
+  .tag {
+    display:inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:.1rem .45rem; border:1px solid currentColor; white-space:nowrap;
+  }
+  .doc ul { padding-left:1.15rem; }
+  .doc li { margin-bottom:.5rem; }
+  .doc li::marker { color:var(--iron); }
+  .masthead { border-bottom:2px solid var(--ink); padding-bottom:1.5rem; margin-bottom:.5rem; }
+  .footer {
+    margin-top:3.5rem; padding-top:1rem; border-top:2px solid var(--ink);
+    font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between;
+  }
+  .s-panel { fill:var(--surface-2); }
+  .s-rule  { stroke:var(--rule); }
+  .s-ink   { fill:var(--ink); }
+  .s-soft  { fill:var(--ink-soft); }
+  .s-iron  { fill:var(--iron); }
+  .s-inst  { fill:var(--inst); }
+  .s-amber { fill:var(--amber); }
+  .s-good  { fill:var(--good); }
+  .s-lbl   { font-family: ui-monospace, Menlo, monospace; font-size:11px; letter-spacing:.08em; }
+  .s-lbl-sm{ font-family: ui-monospace, Menlo, monospace; font-size:9px; letter-spacing:.06em; }
+  .s-on-fill { fill:#17120F; }
+</style>
+
+<div class="doc"><div class="doc-inner">
+
+<div class="masthead">
+  <p class="eyebrow">Resource Chain Proposal 3 of 3 · Water</p>
+  <h1>Ice, Air, and the Provisioned Habitat</h1>
+  <p class="lede">An empty pressurised shell is not a home. The colonists are 203 days out with
+  no resupply behind them; they arrive to whatever oxygen and water we have already banked, or
+  they arrive to a failed mission. This proposal makes that requirement a rule instead of a
+  presumption — and in doing so introduces the game's first <em>stored</em> resource.</p>
+</div>
+
+<blockquote class="inst">
+  <strong>Scope, stated up front.</strong> This is a <strong>post-MVP-loop increment</strong>.
+  The MVP's job is to make the electricity/labour loop fun. None of this ships before that loop
+  is proven, and nothing here competes with it for the next slice of work. Read this as the
+  third of three sibling chains queued behind a working core.
+</blockquote>
+
+<div class="stats">
+  <div class="stat"><b class="c-inst">1,800 kg</b><span>Auger water / turn</span></div>
+  <div class="stat"><b class="c-inst">207 kg</b><span>Stack water / turn</span></div>
+  <div class="stat"><b class="c-amber">1,210 kg</b><span>O₂ / habitat · 180 d</span></div>
+  <div class="stat"><b class="c-iron">4.4</b><span>Reactor-turns / habitat</span></div>
+</div>
+
+<h2>The thesis: a habitat that cannot breathe does not count</h2>
+
+<p>The MVP wins on habitat <em>capacity</em>. Proposal 1 added a second factor —
+<em>rated</em>, meaning shielded well enough for people to live under. This proposal adds the
+third: <strong>provisioned</strong>. A habitat only counts toward readiness if the colony has
+banked breathable oxygen and water for the number of people it claims to house.</p>
+
+<p>That is not a difficulty knob bolted onto the win condition. It is the reason the win
+condition means anything. A readiness score that counts pressurised volume and ignores whether
+there is air in it is measuring construction, not survival.</p>
+
+<p>The second reason to build this chain is mechanical, not thematic. Everything in the MVP is a
+<strong>per-turn flow</strong>: a reactor makes 1,986 kWh this turn, a drone spends 125 kWh this
+turn, and the ledger balances within the turn. Oxygen and water are the first resources that must
+<strong>accumulate across turns and be capped</strong>. That is a genuinely different mechanical
+shape from the other two chains, and it is where storage caps, overflow, and drawdown rules
+first become load-bearing rather than theoretical.</p>
+
+<h2>The chain: one acquisition utility, one assembly line, one structure</h2>
+
+<div class="figure">
+<svg viewBox="0 0 860 340" role="img" aria-label="Flow diagram of the water chain: an Ice Auger drawing 15 kilowatts extracts 1,800 kilograms of water per turn and feeds an Electrolysis Stack drawing 25 kilowatts that converts 207 kilograms of water per turn into 184 kilograms of oxygen and 23 kilograms of hydrogen. The oxygen flows to a Life Support Reserve. The hydrogen branch is drawn dashed and terminates in a box marked no sink, decision required.">
+  <text x="20" y="26" class="s-lbl s-soft">PROVISIONING CHAIN · PER TURN (49.66 H)</text>
+
+  <rect x="20" y="110" width="170" height="100" class="s-panel s-rule" stroke-width="1"></rect>
+  <text x="32" y="138" class="s-lbl s-ink">ICE AUGER</text>
+  <text x="32" y="158" class="s-lbl-sm s-soft">1×1 · 4 BUILD TURNS</text>
+  <text x="32" y="176" class="s-lbl-sm s-inst">15 kW · 37% OF A REACTOR</text>
+  <text x="32" y="196" class="s-lbl-sm s-ink">OUT 1,800 kg H₂O</text>
+
+  <line x1="190" y1="160" x2="244" y2="160" class="s-rule" stroke-width="2"></line>
+  <polygon points="244,154 244,166 256,160" class="s-ink"></polygon>
+
+  <rect x="260" y="110" width="190" height="100" class="s-panel s-rule" stroke-width="1"></rect>
+  <text x="272" y="138" class="s-lbl s-ink">ELECTROLYSIS STACK</text>
+  <text x="272" y="158" class="s-lbl-sm s-soft">2×2 · 7 BUILD TURNS</text>
+  <text x="272" y="176" class="s-lbl-sm s-inst">25 kW · 63% OF A REACTOR</text>
+  <text x="272" y="196" class="s-lbl-sm s-ink">IN 207 kg H₂O · 6 kWh/kg</text>
+
+  <text x="20" y="238" class="s-lbl-sm s-iron">BOTTLENECK: EXTRACTION 1,800 kg/TURN vs CONVERSION 207 kg/TURN — 8.7× OVER-FEED</text>
+
+  <line x1="450" y1="160" x2="520" y2="160" class="s-rule" stroke-width="2"></line>
+  <text x="532" y="184" class="s-lbl-sm s-soft">MASS SPLIT 0.889 O₂ / 0.111 H₂</text>
+
+  <polyline points="520,160 520,90 634,90" fill="none" class="s-rule" stroke-width="2"></polyline>
+  <polygon points="634,84 634,96 646,90" class="s-good"></polygon>
+  <text x="530" y="78" class="s-lbl-sm s-good">184 kg O₂ / TURN</text>
+
+  <polyline points="520,160 520,252 634,252" fill="none" class="c-amber" stroke="currentColor" stroke-width="2" stroke-dasharray="6 5"></polyline>
+  <polygon points="634,246 634,258 646,252" class="s-amber"></polygon>
+  <text x="530" y="240" class="s-lbl-sm s-amber">23 kg H₂ / TURN</text>
+
+  <rect x="650" y="40" width="196" height="100" class="s-panel s-rule" stroke-width="1"></rect>
+  <text x="662" y="68" class="s-lbl s-ink">LIFE SUPPORT RESERVE</text>
+  <text x="662" y="88" class="s-lbl-sm s-soft">2×2 · 5 BUILD TURNS</text>
+  <text x="662" y="106" class="s-lbl-sm s-inst">6 kW · 15% · PRODUCES NOTHING</text>
+  <text x="662" y="126" class="s-lbl-sm s-good">STORES O₂ + H₂O (CAPPED)</text>
+
+  <rect x="650" y="200" width="196" height="104" fill="none" class="c-amber" stroke="currentColor" stroke-width="2" stroke-dasharray="7 5"></rect>
+  <text x="662" y="230" class="s-lbl s-amber">NO SINK</text>
+  <text x="662" y="250" class="s-lbl s-amber">DECISION REQUIRED</text>
+  <text x="662" y="272" class="s-lbl-sm s-soft">VENT WITH A LEDGER LINE,</text>
+  <text x="662" y="288" class="s-lbl-sm s-soft">OR BANK TO A CAPPED TANK</text>
+</svg>
+<p class="figcap">Fig. 1 — The chain, at one of each. The dashed amber branch is the open
+problem: the stack produces hydrogen every turn and the MVP has nowhere to put it. Drawn
+dangling on purpose.</p>
+</div>
+
+<h3>1 · Ice Auger <span class="tag c-inst">acquisition utility</span></h3>
+
+<p>Footprint 1×1, four build turns, draws <strong>15 kW (37% of one reactor)</strong>,
+yields <strong>1.8 t of water per turn</strong>. Must be placed on a shallow-ice deposit tile.</p>
+
+<p>This is the best-measured resource claim in the whole series. Phoenix struck buried ice
+within centimetres of the surface at 68°N in 2008. Mars Odyssey's neutron spectrometer mapped
+near-surface hydrogen globally. NASA's SWIM mapping shows shallow ice poleward of roughly
+35–40° latitude, and mid-latitude ice sheets can exceed 90% purity. For contrast,
+Curiosity measured only about <strong>2 wt%</strong> water in equatorial soil. Ice on Mars is
+real, abundant, and <strong>latitude-dependent</strong> — which is the whole game, and we
+come back to it below.</p>
+
+<p>The energy figure is derived, not asserted. Warming ice from −60 °C costs about
+126 kJ/kg (specific heat ~2.1 kJ/kg·K over 60 K), plus 334 kJ/kg latent heat of fusion:
+<span class="mono">460 kJ/kg = 0.128 kWh/kg</span> as a thermodynamic floor. Real augers do
+mechanical work and leak heat, so budget <strong>~0.4 kWh/kg</strong> — about three times
+the floor. Check the yield: <span class="mono">15 kW × 49.66 h = 745 kWh ÷ 0.4 =
+1,862 kg</span>. The 1.8 t/turn figure is that arithmetic, rounded down.</p>
+
+<h3>2 · Electrolysis Stack <span class="tag c-inst">assembly line</span></h3>
+
+<p>Footprint 2×2, seven build turns, draws <strong>25 kW (63% of one reactor)</strong>.
+Splits water into oxygen and hydrogen.</p>
+
+<p>Stoichiometry is fixed and not negotiable: 1 kg of water yields
+<strong>0.111 kg H₂</strong> and <strong>0.889 kg O₂</strong>. Practical PEM
+electrolysis runs about 52 kWh per kg of hydrogen, which works out to <strong>~6 kWh per kg of
+water</strong>. So one stack processes <span class="mono">1,242 kWh ÷ 6 = 207 kg of water
+per turn</span>, giving <strong>184 kg O₂ + 23 kg H₂</strong>.</p>
+
+<p>The shape matches its two siblings: extraction is cheap, conversion is the bottleneck. But
+the ratio here is much tighter — <strong>8.7×</strong> over-feed, against 40×
+and 80× in the other two chains. That difference matters for play. In the other chains one
+extractor feeds every plant you will ever build, so its count is a formality. Here, one Auger
+sustains <strong>eight</strong> Stacks; the ninth needs a second Auger, which needs a second ice
+tile. This is the first extraction utility whose <em>count</em> is a real decision, and the first
+time a deposit tile is a scarce asset rather than a checkbox.</p>
+
+<p>For scale: one Auger plus eight Stacks draws <span class="mono">15 + 200 = 215 kW</span> —
+<strong>5.4 reactors</strong> committed to breathing.</p>
+
+<h3>3 · Life Support Reserve <span class="tag c-good">structure</span></h3>
+
+<p>Footprint 2×2, five build turns, draws <strong>6 kW (15% of a reactor)</strong> for
+active cryogenic cooling. Note what that is: <strong>the game's first structure with a standing
+power cost that produces nothing.</strong> Pure overhead, permanently on the books. That is a
+real and instructive kind of cost, and the player should feel it — it is the moment power
+budgeting stops being about production and starts being about obligations.</p>
+
+<p>The Reserve is also the first consumer of the shared foundation's
+<span class="mono">storageCapacity</span> field. Without a cap it is not a tank, it is a hole.</p>
+
+<h3>The provisioning bill</h3>
+
+<p>NASA's <em>Baseline Values and Assumptions Document</em> puts metabolic oxygen at about
+<strong>0.84 kg per person per day</strong>. For one 8-colonist habitat with a 180-day margin:
+<span class="mono">8 × 0.84 × 180 = 1,210 kg of oxygen</span>. Water, with recycling,
+at a 30-day banked margin and ~3.5 kg/person/day:
+<span class="mono">8 × 3.5 × 30 = 840 kg</span>.</p>
+
+<p>Now price it. 1,210 kg of O₂ requires <span class="mono">1,210 ÷ 0.889 =
+1,361 kg</span> of water electrolysed, at 6 kWh/kg = <span class="mono">8,164 kWh</span>, plus
+<span class="mono">1,361 × 0.4 = 544 kWh</span> to mine that ice. Total
+<strong>~8,700 kWh</strong>.</p>
+
+<blockquote>
+  <strong>Provisioning a single habitat costs about four and a half turns of one reactor's
+  entire output.</strong> <span class="mono">8,700 ÷ 1,986 = 4.4 reactor-turns.</span>
+  One Stack, running flat out, takes <strong>6.6 turns</strong> to fill one habitat's oxygen
+  tank — and the mission is 278 turns long.
+</blockquote>
+
+<p>That is a real, legible price for a real requirement. It is not a tax invented to slow the
+player down; it is what the chemistry costs. And it is exactly the kind of number a numerate
+player will re-derive on the back of an envelope and then trust the rest of the game for.</p>
+
+<p>One structural property of these numbers is worth stating outright, because it is a genuine
+robustness point in this chain's favour: <strong>the whole chain is scale-invariant.</strong>
+Every quantity in it is per-person or per-kilogram — 0.84 kg O₂ per person per day,
+6 kWh per kg of water, 0.4 kWh per kg of ice — and not one of them is per-square-metre. The
+tile scale is currently <strong>1 tile = 5 m (25 m² per tile)</strong>, my derived
+recommendation pending the General's ratification, revised down from an earlier 10 m figure.
+<strong>That revision changed nothing above.</strong> A chain priced per square metre would have
+had to be rewritten; the provisioning cost of a habitat does not depend on how big we decide a
+tile is. Only the footprints (1×1, 2×2) are expressed in tiles, and those are counts,
+not areas.</p>
+  <p><strong>Ratified while this document was being written:</strong> the General has confirmed both shared parameters — a <span class="mono">5 kW</span> drone and a <span class="mono">5 m</span> tile. They are no longer pending. The corrected drone recharge draw is therefore <span class="mono">5.54 kW</span>, which revises the spec’s 5.07 kW to include charge efficiency and battery thermal maintenance against a −60&nbsp;°C ambient. Neither number appears in the arithmetic on this page — but together they set how much reactor output is left to run an Auger and a Stack, so they bound every throughput figure above indirectly.</p>
+
+<h3>Illustrative catalog entries</h3>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>id</th><th>footprint</th><th>build turns</th><th>power</th><th>throughput / capacity</th><th>siting</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="mono">ice-auger</td>
+      <td class="num">1×1</td>
+      <td class="num">4</td>
+      <td class="num">−15 kW (37%)</td>
+      <td class="num">1,800 kg H₂O / turn</td>
+      <td>shallow-ice deposit</td>
+    </tr>
+    <tr>
+      <td class="mono">electrolysis-stack</td>
+      <td class="num">2×2</td>
+      <td class="num">7</td>
+      <td class="num">−25 kW (63%)</td>
+      <td class="num">207 kg H₂O → 184 kg O₂ + 23 kg H₂</td>
+      <td>none</td>
+    </tr>
+    <tr>
+      <td class="mono">life-support-reserve</td>
+      <td class="num">2×2</td>
+      <td class="num">5</td>
+      <td class="num">−6 kW (15%)</td>
+      <td class="num">1,210 kg O₂ + 840 kg H₂O stored</td>
+      <td>none</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p class="figcap">Illustrative catalog data, not code. The Reserve's capacity is proposed as
+<em>exactly one habitat-provision</em> so the arithmetic stays legible: one Reserve per habitat,
+full tank means ready. That sizing is a balance decision — see Decisions, item 1.</p>
+
+<h2>Ice wants poleward; sunlight wants the equator</h2>
+
+<p>This is the best thing in the proposal, and it is not something I invented. It is Martian
+geography.</p>
+
+<p>Accessible shallow ice begins poleward of roughly <strong>35–40°</strong> latitude.
+Solar insolation peaks at the equator and falls off toward the poles — and poleward sites
+additionally suffer worse seasonal variation and more dust-storm exposure, so the penalty is
+steeper than the cosine alone suggests. Proposal 2 (solar) therefore pulls the landing site
+toward the equator, and Proposal 3 (water) pulls it poleward. <strong>The player cannot have
+both optima.</strong></p>
+
+<div class="figure">
+<svg viewBox="0 0 860 730" role="img" aria-label="Two-panel diagram of the latitude tradeoff. The upper panel shows a quarter-section of Mars from equator to pole: a band of accessible shallow ice hugs the surface poleward of about 35 to 40 degrees, while solar rays drawn outside the surface shorten steadily from equator to pole. Two candidate sites are marked, A near the equator and B at mid latitude. The lower panel plots the two effects against latitude: solar insolation falls from a maximum at the equator, accessible ice rises steeply from about 35 degrees, and the two curves cross near 46 degrees inside a shaded contested band from 35 to 50 degrees.">
+
+  <text x="20" y="30" class="s-lbl s-soft">A · WHERE THE ICE IS, AND WHERE THE SUN IS</text>
+
+  <path d="M 100,340 L 330,340 A 230,230 0 0 0 100,110 Z" class="s-panel"></path>
+  <path d="M 330,340 A 230,230 0 0 0 100,110" fill="none" stroke="currentColor" stroke-width="2"></path>
+  <line x1="100" y1="340" x2="330" y2="340" stroke="currentColor" stroke-width="1"></line>
+  <line x1="100" y1="340" x2="100" y2="110" stroke="currentColor" stroke-width="1"></line>
+
+  <path d="M 288.4,208.1 A 230,230 0 0 0 100,110 L 100,133 A 207,207 0 0 1 269.6,221.3 Z" class="s-inst"></path>
+
+  <line x1="352" y1="340" x2="385" y2="340" class="c-amber" stroke="currentColor" stroke-width="3"></line>
+  <line x1="346.5" y1="287.6" x2="373.9" y2="281.8" class="c-amber" stroke="currentColor" stroke-width="3"></line>
+  <line x1="330.2" y1="237.5" x2="349.4" y2="229.0" class="c-amber" stroke="currentColor" stroke-width="3"></line>
+  <line x1="303.9" y1="191.9" x2="315.2" y2="183.6" class="c-amber" stroke="currentColor" stroke-width="3"></line>
+  <line x1="268.6" y1="152.7" x2="274.0" y2="146.8" class="c-amber" stroke="currentColor" stroke-width="3"></line>
+
+  <line x1="214.7" y1="259.7" x2="304.8" y2="196.6" class="c-iron" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"></line>
+  <line x1="207.2" y1="250.0" x2="291.5" y2="179.3" class="c-iron" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"></line>
+  <text x="322" y="186" class="s-lbl-sm s-iron">35–40° ICE ONSET</text>
+
+  <text x="48" y="98" class="s-lbl s-soft">POLE · 90°</text>
+  <text x="215" y="366" class="s-lbl s-soft" text-anchor="middle">EQUATOR · 0°</text>
+
+  <line x1="250" y1="128" x2="208" y2="143" class="s-rule" stroke-width="1"></line>
+  <text x="256" y="116" class="s-lbl s-inst">SHALLOW ICE — POLEWARD OF ~35–40°</text>
+  <text x="256" y="134" class="s-lbl-sm s-soft">MID-LATITUDE SHEETS &gt;90% PURITY</text>
+
+  <line x1="394" y1="298" x2="376" y2="288" class="s-rule" stroke-width="1"></line>
+  <text x="400" y="300" class="s-lbl s-amber">SOLAR INSOLATION</text>
+  <text x="400" y="318" class="s-lbl-sm s-soft">PEAKS AT THE EQUATOR,</text>
+  <text x="400" y="334" class="s-lbl-sm s-soft">FALLS POLEWARD</text>
+  <text x="400" y="358" class="s-lbl-sm s-soft">EQUATORIAL SOIL: ~2 wt% WATER (CURIOSITY)</text>
+
+  <circle cx="327.8" cy="308.0" r="11" class="s-panel c-amber" stroke="currentColor" stroke-width="2"></circle>
+  <text x="327.8" y="312" class="s-lbl s-ink" text-anchor="middle">A</text>
+  <circle cx="241.6" cy="158.8" r="11" class="s-panel c-good" stroke="currentColor" stroke-width="2"></circle>
+  <text x="241.6" y="162.8" class="s-lbl s-ink" text-anchor="middle">B</text>
+
+  <line x1="20" y1="390" x2="840" y2="390" class="s-rule" stroke-width="1"></line>
+  <text x="20" y="414" class="s-lbl s-soft">B · THE TWO CURVES CROSS</text>
+
+  <rect x="384.4" y="440" width="113.4" height="220" class="s-panel"></rect>
+  <text x="441" y="456" class="s-lbl-sm s-iron" text-anchor="middle">CONTESTED 35°–50°</text>
+
+  <line x1="120" y1="660" x2="800" y2="660" class="s-rule" stroke-width="2"></line>
+  <line x1="120" y1="440" x2="120" y2="660" class="s-rule" stroke-width="2"></line>
+  <text x="112" y="444" class="s-lbl-sm s-soft" text-anchor="end">HIGH</text>
+  <text x="112" y="658" class="s-lbl-sm s-soft" text-anchor="end">LOW</text>
+
+  <polyline points="120,440 195.6,443.3 271.1,453.2 346.7,469.5 422.2,491.5 497.8,518.6 573.3,550 648.9,584.8 724.4,621.8 800,660" fill="none" class="c-amber" stroke="currentColor" stroke-width="3"></polyline>
+  <polyline points="120,660 271.1,655.6 346.7,642.4 384.4,605 422.2,550 460,517 497.8,484 573.3,462 648.9,451 724.4,444.4 800,440" fill="none" class="c-inst" stroke="currentColor" stroke-width="3"></polyline>
+
+  <circle cx="471" cy="508" r="5" class="s-iron"></circle>
+  <text x="505" y="505" class="s-lbl-sm s-iron">CROSSOVER</text>
+
+  <text x="150" y="470" class="s-lbl s-amber">SOLAR INSOLATION</text>
+  <text x="150" y="632" class="s-lbl s-inst">ACCESSIBLE SHALLOW ICE</text>
+
+  <text x="150" y="545" class="s-lbl-sm s-soft">A · EQUATORIAL SOLAR SITE — MAX SUN, NO ICE</text>
+  <text x="150" y="563" class="s-lbl-sm s-soft">B · MID-LATITUDE ICE SITE — ICE, WEAKER SUN</text>
+
+  <circle cx="180.4" cy="660" r="11" class="s-panel c-amber" stroke="currentColor" stroke-width="2"></circle>
+  <text x="180.4" y="664" class="s-lbl s-ink" text-anchor="middle">A</text>
+  <circle cx="513" cy="660" r="11" class="s-panel c-good" stroke="currentColor" stroke-width="2"></circle>
+  <text x="513" y="664" class="s-lbl s-ink" text-anchor="middle">B</text>
+
+  <text x="120" y="684" class="s-lbl-sm s-soft" text-anchor="middle">0°</text>
+  <text x="233.3" y="684" class="s-lbl-sm s-soft" text-anchor="middle">15°</text>
+  <text x="346.7" y="684" class="s-lbl-sm s-soft" text-anchor="middle">30°</text>
+  <text x="460" y="684" class="s-lbl-sm s-soft" text-anchor="middle">45°</text>
+  <text x="573.3" y="684" class="s-lbl-sm s-soft" text-anchor="middle">60°</text>
+  <text x="686.7" y="684" class="s-lbl-sm s-soft" text-anchor="middle">75°</text>
+  <text x="800" y="684" class="s-lbl-sm s-soft" text-anchor="middle">90°</text>
+  <text x="460" y="706" class="s-lbl s-soft" text-anchor="middle">LATITUDE</text>
+</svg>
+<p class="figcap">Fig. 2 — The centrepiece. Ice onset near 35–40° and the
+equatorial insolation peak are measured facts; the crossing point and the width of the contested
+band are illustrative shapes, not published curves. The shape of the argument does not depend on
+their exact position.</p>
+</div>
+
+<p>This is why I want the two chains built <strong>as a pair</strong> rather than either one
+alone. Proposal 2 on its own is a power-generation option, which the reactor already covers.
+Proposal 3 on its own is a provisioning cost with a siting requirement. Together they turn the
+survey screen from a scoring exercise into a <strong>genuine strategic commitment made in the
+first sixty seconds of the game</strong> — a decision the player cannot undo and will
+still be paying for at turn 200. Neither chain generates that tension by itself. Shipping only
+one is the worse version of both.</p>
+
+<p>Being honest about the cost of this: the survey screen's site scoring
+(<span class="mono">aic-74p.3</span>) will need to <strong>expose latitude</strong> as a
+first-class site attribute, and it may not currently do so. If site generation today produces
+deposits and terrain without a latitude value, that is added scope on the survey side and it
+belongs in the estimate. It is also small, and it is the enabling change for both proposals.</p>
+
+<h3>The three-factor readiness test</h3>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>factor</th><th>the test</th><th>introduced by</th><th>data required</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>built</strong></td>
+      <td>Habitat module complete on its 2×2 footprint</td>
+      <td>Accepted MVP proposal</td>
+      <td class="mono">habitatCapacity</td>
+    </tr>
+    <tr>
+      <td><strong>rated</strong></td>
+      <td>Shielded to the dose target for its claimed occupancy</td>
+      <td>Proposal 1 · regolith / shielding</td>
+      <td>Proposal 1's rating field</td>
+    </tr>
+    <tr>
+      <td><strong>provisioned</strong></td>
+      <td>Banked O₂ and H₂O meet the margin for its claimed occupancy</td>
+      <td><strong>Proposal 3 · this one</strong></td>
+      <td class="mono">storageCapacity</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>Three factors, three proposals, one readiness number. A habitat that fails any one of them
+contributes zero, not a fraction — you cannot half-breathe.</p>
+
+<h2>The hydrogen problem</h2>
+
+<p>This is a correctness issue, not flavour, so it gets its own heading.</p>
+
+<p>Each Stack produces <strong>23 kg of hydrogen per turn</strong> and the MVP has
+<strong>nothing to do with it</strong>. A byproduct with no sink is exactly the kind of thing
+that silently vanishes: someone writes <span class="mono">produces: { oxygen: 184000 }</span>,
+omits the hydrogen because there is no consumer, and now the ledger is not conserving mass. That
+does not fail a test. It fails quietly, for months, until balance work starts and nobody can
+explain where the numbers went.</p>
+
+<blockquote class="amber">
+  <strong>I want an explicit decision here, not a default.</strong> The two defensible options
+  are: (a) vent it, with a line in the cycle report every single turn — never silently; or
+  (b) bank it against a future methane chain (Sabatier: CO₂ + 4H₂ → CH₄ +
+  2H₂O, using an atmosphere that is 95.1% CO₂ at ~610 Pa).
+</blockquote>
+
+<p><strong>My recommendation: both.</strong> Bank hydrogen to a capped tank, vent on overflow,
+and <em>always</em> report the vent. That gives the ledger a real sink, keeps the cap as a
+visible logistics fact, and leaves the door open for methane later without designing methane now.
+The one thing I will not accept is a quantity that leaves the simulation without appearing in the
+report.</p>
+
+<p>The Sabatier chain itself is <strong>explicitly out of scope for this proposal</strong>, per
+constitution §8. Three chains already justify the shared foundation; a fourth speculative
+one justifies nothing and costs review time.</p>
+
+<h2>The bad-site fallback — noted and deferred</h2>
+
+<p>There is a real alternative that needs no ice deposit at all, and it has flown.
+<strong>MOXIE</strong> on Perseverance produced oxygen directly from the Martian atmosphere at up
+to about <strong>12 g per hour on roughly 300 W</strong> — on the order of
+<span class="mono">25 kWh per kg of O₂</span>, and 25–50 kWh/kg once you allow for
+duty cycle and warm-up. Compare water electrolysis at <span class="mono">6 ÷ 0.889 =
+6.75 kWh per kg of O₂</span>.</p>
+
+<p>So atmospheric CO₂ electrolysis is roughly <strong>4–7× worse per
+kilogram</strong> — but it works <em>anywhere</em> and needs no landing-site luck. That
+makes it precise insurance for a player who committed to an equatorial solar site and now cannot
+reach ice. It is also a strictly better follow-up proposal than a battery: it interacts with a
+decision the player already made, instead of smoothing one out.</p>
+
+<p>I am flagging MOXIE as the <strong>recommended next proposal</strong> and keeping it out of
+this one. It only makes sense once there is a committed site to regret.</p>
+
+<h2>The shared foundation — build it once</h2>
+
+<p>All three sibling chains need the same five additions. They should be built
+<strong>once, as a shared prerequisite</strong>, not three times. This proposal does not justify
+them alone — per constitution §8 the abstraction is earned by three real callers, and
+it has exactly three.</p>
+
+<p>The current <span class="mono">StructureTypeSpec</span> in
+<span class="mono">src/sim/catalog.ts</span> has <span class="mono">id, name, footprint,
+buildTurns, produces, consumes, habitatCapacity</span>. The gaps:</p>
+
+<ol>
+  <li><strong><span class="mono">buildCost: ResourceAmounts</span></strong> — a one-time
+  bill of materials. Today <span class="mono">consumes</span> is a per-turn operating draw, so
+  there is nowhere to record "this stack costs 80 kg of silicon to build." A production chain
+  whose output cannot be spent on anything is just a number that goes up.</li>
+
+  <li><strong><span class="mono">siting.requiresDeposit?: string</span></strong> — "must be
+  placed on an ice deposit tile." Without it, deposits are decoration and the survey screen's
+  proximity score is a lie. <em>The Ice Auger is the load-bearing caller here:</em> with an
+  8.7× over-feed ratio, ice tile count is a real constraint, not a formality.</li>
+
+  <li><strong><span class="mono">storageCapacity: ResourceAmounts</span></strong> — a
+  stockpile cap. <strong>This one is a hard requirement for this chain specifically</strong>, not
+  a nice-to-have: oxygen and water are the game's first stored resources and the Life Support
+  Reserve <em>is</em> a storage cap wearing a footprint. Unbounded accumulation removes every
+  logistics decision, and an overflow that is silently discarded is a ledger bug that will not
+  surface until balance work. The other two chains can limp without caps. This one cannot exist
+  without them.</li>
+
+  <li><strong>Integer base units — watt-hours and grams.</strong>
+  <span class="mono">time.ts</span> argues at length that integers are non-negotiable
+  project-wide for determinism; <span class="mono">catalog.ts</span> then accepts any finite
+  non-negative number. Float sums are order-dependent, and margin checks start hinging on
+  119.99999 vs 120 — which, for a provisioning check, is the difference between "ready" and
+  "not ready" on identical inputs. Cheap now (a validator change), expensive after the
+  golden-trace baselines exist.</li>
+
+  <li><strong>Brownout priority as a documented total order</strong> over a much larger consumer
+  set, plus <strong>one</strong> documented rule for partial power. I recommend
+  <strong>binary idle</strong> — a plant either runs at full rate or not at all —
+  rather than fractional throughput. Fractional rates reintroduce rounding drift and make the
+  cycle report much harder to explain. "The stack was idle this turn" is a sentence a player can
+  act on; "the stack ran at 62% and produced 114.08 kg" is not.</li>
+</ol>
+
+<p>Note that this chain adds a consumer class the priority order has not had to rank before: a
+structure that <em>stores</em> and produces nothing. Where does the Reserve's 6 kW sit relative
+to a producing plant? See Decisions, item 2.</p>
+
+<h2>What this must not break</h2>
+
+<p>Every item below is a test that must exist before this merges. They are ordered by how badly
+they would hurt if they were wrong.</p>
+
+<ul>
+  <li><strong>Tank at exactly capacity.</strong> Stockpile equal to
+  <span class="mono">storageCapacity</span> must accept zero further input, report zero overflow
+  discarded, and not go one gram over. The boundary is where off-by-one storage bugs live.</li>
+
+  <li><strong>Overflow is reported, never silently dropped.</strong> A turn that produces more
+  oxygen than the Reserve can hold must emit an explicit overflow line in the cycle report with
+  the discarded quantity. A test asserting the report line, not just the final stockpile.</li>
+
+  <li><strong>Oxygen consumed by a habitat completed the same turn.</strong> Ordering hazard: a
+  habitat that finishes construction on turn <em>N</em> — does it draw provisions on
+  <em>N</em> or <em>N+1</em>? Pick one, document it, test it. Either answer is fine; an untested
+  answer is not.</li>
+
+  <li><strong>Deposit exhausted mid-build.</strong> An Auger four turns into construction on a
+  tile whose ice deposit is depleted. Must not produce a completed structure that yields nothing
+  forever with no explanation, and must not throw. Test the resulting state and the report
+  line.</li>
+
+  <li><strong>Readiness recomputed when a tank drains below the margin.</strong> Provisioned is
+  not a one-time flag. If a habitat is marked ready and the Reserve is later drawn down below the
+  180-day margin, readiness must fall back. A cached boolean here is the single most likely bug
+  in the whole feature.</li>
+
+  <li><strong>Partial provisioning across multiple habitats.</strong> Three habitats and enough
+  oxygen for one and a half. The rule must be deterministic and documented — I recommend
+  fully provisioning in placement order rather than spreading thin, because half-provisioned
+  habitats count for nothing and spreading produces three zeros instead of one one.</li>
+
+  <li><strong>Brownout during a partial build.</strong> An Auger or Stack mid-construction when
+  power goes short. Build progress must not advance, must not reset, and must be reported.</li>
+
+  <li><strong>Empty stockpile and stockpile exactly equal to cost.</strong> Once
+  <span class="mono">buildCost</span> exists: a build order with exactly enough material must
+  succeed and leave zero; with one gram less must fail cleanly with a legible reason.</li>
+
+  <li><strong>Determinism of the whole ledger.</strong> Same seed plus same orders must produce a
+  byte-identical trace across the full oxygen/water/hydrogen ledger, including overflow and vent
+  lines, across at least 50 turns. This is the test that protects everything above from
+  silently regressing.</li>
+</ul>
+
+<h2>Decisions I need from you</h2>
+
+<ol>
+  <li><strong>How big is one Life Support Reserve?</strong> I propose exactly one
+  habitat-provision (1,210 kg O₂ + 840 kg H₂O), so the mapping is one Reserve per
+  habitat and "full tank means ready" is legible without arithmetic.
+  <em>Cost of being wrong:</em> low and reversible — it is a capacity number in catalog
+  data, not structure. If it is too small the player builds tank farms, which is tedious; too
+  large and storage stops being a decision.</li>
+
+  <li><strong>Where does a storage structure sit in the brownout priority order?</strong> The
+  Reserve's 6 kW produces nothing, so a naive "producers first" order idles it first. I recommend
+  the opposite: <strong>life support outranks production</strong>, and an unpowered Reserve is a
+  reported warning rather than a silent loss — I am explicitly <em>not</em> proposing a
+  boil-off model in this increment.
+  <em>Cost of being wrong:</em> moderate. Get it backwards and a power shortfall quietly destroys
+  banked provisions, which is a save-ruining outcome discovered late.</li>
+
+  <li><strong>Hydrogen: vent, bank, or both?</strong> I recommend bank to a capped tank, vent on
+  overflow, always report the vent.
+  <em>Cost of being wrong:</em> high if the answer is "ignore it." An unreported quantity leaving
+  the simulation is a ledger defect that will not surface until it has corrupted every balance
+  conclusion drawn from the game.</li>
+
+  <li><strong>Does the survey screen expose latitude?</strong> The paired Proposal 2 / Proposal 3
+  tension needs latitude as a first-class site attribute in
+  <span class="mono">aic-74p.3</span>. I recommend adding it there, once, as a shared enabler
+  rather than inside either chain.
+  <em>Cost of being wrong:</em> if it is skipped, both proposals still function mechanically but
+  the strategic tension — the best thing in either of them — never reaches the
+  player.</li>
+</ol>
+
+<p><strong>Working defaults are in use — nothing is blocked.</strong> One
+habitat-provision per Reserve, life support above production in the priority order, bank-and-vent
+for hydrogen. If you overrule any of them the change is catalog data or one documented rule, not
+a rewrite.</p>
+
+<h2>Scope, restated</h2>
+
+<p>In scope: three catalog entries, the <span class="mono">storageCapacity</span> consumer, the
+provisioned readiness factor, a hydrogen sink decision, and latitude on the survey screen.</p>
+
+<p>Out of scope and staying out: the Sabatier / methane chain, MOXIE atmospheric oxygen (next
+proposal), boil-off modelling, and any water recycling model beyond the flat 3.5 kg/person/day
+assumption in the provisioning bill. Per constitution §8, none of those has three callers
+yet.</p>
+
+<p>And once more, plainly: <strong>this ships after the MVP's electricity and labour loop is
+proven fun.</strong> Not before, and not instead.</p>
+
+<div class="footer"><span>AI City · Ice, Air, and the Provisioned Habitat</span><span>Raynor · QA &amp; Systems</span></div>
+
+</div></div>
+</article>
+
+</main>
+</div>
+</body>
+</html>

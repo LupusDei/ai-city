@@ -34,6 +34,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { stripNonCode } from '../support/strip-non-code'
+
 const SIM_DIR = join(import.meta.dirname, '../../src/sim')
 
 /**
@@ -57,6 +59,12 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // --- Public API awaiting an application layer (aic-hfb) ---
   'turn.createColony',
   'turn.resolveTurn',
+  // orders.applyOrders is spec 005 T003's player-order layer: the composition root
+  // (T007, src/sim/resolve.ts) is meant to call it as step 1, ahead of resolveTurn —
+  // same category as turn.createColony/turn.resolveTurn just above, awaiting the same
+  // not-yet-built application layer. tests/integration/orders-turn-seam.test.ts proves
+  // it composes correctly with turn.ts today; it is not itself that production caller.
+  'orders.applyOrders',
   'world.generateWorld',
   'world.buildabilityScorerFor',
   'world.depositCoords',
@@ -69,16 +77,24 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   'catalog.listStructureTypes',
 
   // --- Intended consumer is a chain bead not yet built ---
+  // generation.registerOutputModel (aic-a00.18): the extension point itself. This file
+  // only counts CROSS-FILE callers, and generation.ts's own three built-in curves
+  // (constant, solarDecay, radioisotopeDecay) register themselves inside generation.ts
+  // at module load — a REAL production call, just one this scanner skips by design.
+  // A cross-file call appears once a real solar/RTG structure ships in catalog data
+  // naming a curve registered elsewhere (spec 003 chain 2, not yet built).
+  // tests/integration/generation-seam.test.ts proves the registry works end to end
+  // through resolveTurn today by registering and using an invented kind.
+  'generation.registerOutputModel',
   'scale.tileAreaForEdgeM2', // aic-ck0 / chain 1 berm cost
   'scale.footprintAreaM2', // aic-ck0 / chain 1 berm cost
   'scale.arealMassKg', // aic-ck0 / chain 1 berm cost
   'scale.arealDensityKgPerM2', // aic-ck0 / chain 1 berm cost
   'buildability.eligibleDepositKinds', // chains 2 and 3 deposit-gated siting
-  'construction.queueConstruction', // application layer places structures
+  // construction.queueConstruction/.enqueueProject/.cancelProject/.releaseTiles were
+  // here as "application layer places structures" — orders.ts (spec 005 T003) IS that
+  // application layer for these four now, so they were REMOVED rather than left stale.
   'construction.createProject',
-  'construction.enqueueProject',
-  'construction.cancelProject',
-  'construction.releaseTiles',
   'construction.occupiedTiles',
   'construction.requiredLabourHoursPerBuildTurn',
   'construction.totalLabourHoursRequired',
@@ -95,15 +111,41 @@ interface Audit {
   readonly wired: readonly string[]
 }
 
-function auditComposition(): Audit {
+/**
+ * Reads every `.ts` file directly under `src/sim` from disk. Split out from
+ * `auditModules` (the actual audit logic) so that logic can be unit-tested
+ * against synthetic in-memory fixtures without touching the filesystem — see
+ * the "caller detection ignores comments and strings" tests below.
+ */
+function readSimSources(): ReadonlyMap<string, string> {
   const files = readdirSync(SIM_DIR).filter((f) => f.endsWith('.ts'))
   const source = new Map<string, string>()
   for (const file of files) source.set(file, readFileSync(join(SIM_DIR, file), 'utf8'))
+  return source
+}
+
+/**
+ * The audit itself, over an arbitrary `filename -> source text` map.
+ *
+ * `aic-7mb`: this used to run its regexes over RAW file text, so a call-shaped
+ * string inside a comment or a string/template literal (a JSDoc pseudocode
+ * example, say) was indistinguishable from a real call expression — which is
+ * exactly backwards for a gate whose entire job is telling "wired" from "not".
+ * Every file is passed through `stripNonCode` first, which blanks comment and
+ * string/template-literal bodies while leaving real code untouched (see
+ * `tests/support/strip-non-code.ts` for the scanner and its documented
+ * limitations). Both halves of the audit — which names are exported, and which
+ * names are called — run on that stripped text, so a fake export declaration or
+ * a fake call hidden in prose can affect neither.
+ */
+function auditModules(source: ReadonlyMap<string, string>): Audit {
+  const codeOnly = new Map<string, string>()
+  for (const [file, text] of source) codeOnly.set(file, stripNonCode(text))
 
   const orphans: string[] = []
   const wired: string[] = []
 
-  for (const [file, text] of source) {
+  for (const [file, text] of codeOnly) {
     const moduleName = file.slice(0, -3)
     // Exported FUNCTIONS only. Types have no runtime call site, and constants are
     // frequently and legitimately re-exported for tests, so including either would
@@ -112,7 +154,7 @@ function auditComposition(): Audit {
       const name = match[1]
       if (name === undefined) continue
       let callers = 0
-      for (const [otherFile, otherText] of source) {
+      for (const [otherFile, otherText] of codeOnly) {
         if (otherFile === file) continue
         // A call, not a mention: the name followed by an open paren. Import lines and
         // prose references do not match, which is what keeps a comment about a
@@ -123,6 +165,10 @@ function auditComposition(): Audit {
     }
   }
   return { orphans: orphans.sort(), wired: wired.sort() }
+}
+
+function auditComposition(): Audit {
+  return auditModules(readSimSources())
 }
 
 describe('composition audit (the ratchet)', () => {
@@ -160,5 +206,110 @@ describe('composition audit (the ratchet)', () => {
     ]) {
       expect(wired).toContain(required)
     }
+  })
+})
+
+/**
+ * `aic-7mb`: caller detection must tell a real call apart from a call-shaped
+ * string of prose. These run `auditModules` directly against small synthetic
+ * fixtures — two-file maps that never touch disk — so each scenario is
+ * isolated from the real (and constantly-changing) `src/sim` tree. The real
+ * tree is still exercised by the `describe` block above; these pin the
+ * specific defect and its fix.
+ */
+describe('composition audit — caller detection ignores comments and literals (aic-7mb)', () => {
+  it('should NOT count a call appearing only inside a // comment as wiring', () => {
+    const { orphans, wired } = auditModules(
+      new Map([
+        ['a.ts', 'export function target() { return 1 }'],
+        ['b.ts', '// target() looks like a call but is only a code note\nexport function other() { return 2 }'],
+      ]),
+    )
+    expect(orphans).toContain('a.target')
+    expect(wired).not.toContain('a.target')
+  })
+
+  it('should NOT count a call appearing only inside a /* */ block comment as wiring', () => {
+    const { orphans, wired } = auditModules(
+      new Map([
+        ['a.ts', 'export function target() { return 1 }'],
+        ['b.ts', '/* target() commented out during debugging */\nexport function other() { return 2 }'],
+      ]),
+    )
+    expect(orphans).toContain('a.target')
+    expect(wired).not.toContain('a.target')
+  })
+
+  it('should NOT count a call appearing only inside a JSDoc pseudocode example as wiring — the exact aic-7mb shape', () => {
+    // This reproduces the real defect: orders.ts's header carried a
+    // `resolveTurn(ordered)` worked example, and the ratchet counted it as a
+    // production call site for `turn.resolveTurn`.
+    const b = [
+      '/**',
+      ' * Example usage:',
+      ' *   const outcome = target(ordered)',
+      ' */',
+      'export function other() { return 2 }',
+    ].join('\n')
+    const { orphans, wired } = auditModules(
+      new Map([['a.ts', 'export function target() { return 1 }'], ['b.ts', b]]),
+    )
+    expect(orphans).toContain('a.target')
+    expect(wired).not.toContain('a.target')
+  })
+
+  it('should NOT count a call appearing only inside a single- or double-quoted string as wiring', () => {
+    const { orphans, wired } = auditModules(
+      new Map([
+        ['a.ts', 'export function target() { return 1 }'],
+        [
+          'b.ts',
+          [
+            "const single = 'please call target() manually'",
+            'const double = "please call target() manually"',
+            'export function other() { return 2 }',
+          ].join('\n'),
+        ],
+      ]),
+    )
+    expect(orphans).toContain('a.target')
+    expect(wired).not.toContain('a.target')
+  })
+
+  it('should NOT count a call appearing only inside a template literal as wiring', () => {
+    const { orphans, wired } = auditModules(
+      new Map([
+        ['a.ts', 'export function target() { return 1 }'],
+        ['b.ts', 'const msg = `please call target() manually`\nexport function other() { return 2 }'],
+      ]),
+    )
+    expect(orphans).toContain('a.target')
+    expect(wired).not.toContain('a.target')
+  })
+
+  it('should still count a REAL call as wiring — the fix does not create false orphans', () => {
+    const { orphans, wired } = auditModules(
+      new Map([
+        ['a.ts', 'export function target() { return 1 }'],
+        ['b.ts', 'import { target } from "./a"\nexport function other() { return target() }'],
+      ]),
+    )
+    expect(wired).toContain('a.target')
+    expect(orphans).not.toContain('a.target')
+  })
+
+  it('should still count a real call when the SAME file also contains a decoy in a comment and a string', () => {
+    // Belt and braces: a file that has both the noise (comment + string decoy)
+    // AND the real call must still resolve to wired, proving the stripping
+    // does not accidentally eat the genuine call site too.
+    const b = [
+      '// target() as a note-to-self',
+      'const msg = "target() in prose"',
+      'import { target } from "./a"',
+      'export function other() { return target() }',
+    ].join('\n')
+    const { orphans, wired } = auditModules(new Map([['a.ts', 'export function target() { return 1 }'], ['b.ts', b]]))
+    expect(wired).toContain('a.target')
+    expect(orphans).not.toContain('a.target')
   })
 })

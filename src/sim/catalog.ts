@@ -83,6 +83,15 @@
 // module gaining any knowledge of the ordering rule itself. `brownout.ts` imports
 // nothing, so there is no cycle.
 import { PRIORITY_DEFAULT } from './brownout'
+// `generation.ts` owns what a `powerOutputModel` NAME means and where it is
+// interpreted; this module only stores the one a structure declares and defaults it to
+// the named constant for "never moves" — same normalise-optionals contract as
+// `priorityClass` importing `PRIORITY_DEFAULT` from `brownout.ts` just above, and for
+// the identical reason: exactly one spelling of the default, owned by the module that
+// gives it meaning. `generation.ts` type-imports `StructureType` from here, but never
+// imports a VALUE from this module, so there is no runtime cycle — only `import type`
+// crosses back, and that is erased at compile time.
+import { CONSTANT_OUTPUT_KIND } from './generation'
 
 /** A tile offset relative to a structure's anchor tile. */
 export interface FootprintOffset {
@@ -279,6 +288,33 @@ export interface StructureTypeSpec {
    * `siting` without knowing anything about grids or deposits.
    */
   readonly priorityClass?: number
+  /**
+   * Which registered CURVE (`generation.ts`) interprets this structure's
+   * `produces.electricity` figure over an instance's operating life and the colony's
+   * environment — "does this generator's output ever move, and how" (aic-a00.18).
+   *
+   * An OPEN string key, exactly like `siting.requiresDeposit`: this module holds the
+   * reference, never the meaning, and whether the named kind is actually REGISTERED is
+   * not knowable here — this module does not import `generation.ts`'s registry, only
+   * its default-name constant (see the import at the top of this file) — and is not
+   * checked. `generation.ts`'s `currentOutputWh` throws at resolve time if the name is
+   * not registered, matching how a `siting.requiresDeposit` naming an unregistered
+   * deposit kind fails at placement time, not here.
+   *
+   * `produces.electricity` remains the SOLE source of a generator's RATED (peak,
+   * undecayed, unmodulated) output, authored with `power.ts`'s `energyPerTurnWh`
+   * exactly as before this field existed. This field never duplicates or overrides
+   * that number — it only names how the number is allowed to move.
+   *
+   * Optional; absent normalises to `CONSTANT_OUTPUT_KIND` ("this generator's output
+   * never moves"), imported from `generation.ts` so there is exactly one spelling of
+   * that name — the same reason `priorityClass` imports `PRIORITY_DEFAULT` rather than
+   * restating it inline. A pure consumer with no `produces.electricity` at all may
+   * leave this field absent too: the constant curve then resolves a rated `0` to an
+   * actual `0`, exactly what such a structure already reported before this field
+   * existed.
+   */
+  readonly powerOutputModel?: string
   /** Colonists this structure can house once complete. `0` for non-habitat structures. */
   readonly habitatCapacity: number
 }
@@ -299,7 +335,9 @@ export interface StructureTypeSpec {
  *
  * `priorityClass` follows the same rule with a non-`{}` default: absent normalises
  * to `PRIORITY_DEFAULT`, so no consumer writes `type.priorityClass ?? DEFAULT` and
- * no two consumers can pick different defaults.
+ * no two consumers can pick different defaults. `powerOutputModel` follows it a third
+ * time, defaulting to `CONSTANT_OUTPUT_KIND` instead of `{}`, so `generation.ts`'s
+ * `currentOutputWh` never needs `type.powerOutputModel ?? CONSTANT_OUTPUT_KIND` either.
  *
  * Still assignable to `StructureTypeSpec`, so a validated type can be fed back
  * into `createCatalog` (e.g. a save-file round trip) without adaptation.
@@ -310,6 +348,7 @@ export interface StructureType extends StructureTypeSpec {
   readonly storageCapacity: ResourceAmounts
   readonly standbyConsumes: ResourceAmounts
   readonly priorityClass: number
+  readonly powerOutputModel: string
 }
 
 /**
@@ -466,12 +505,95 @@ function validateStandbyConsumes(
   }
 }
 
+/**
+ * Validate a `powerOutputModel` name.
+ *
+ * Checked only for PRESENCE-and-non-emptiness — the exact same shape of check
+ * `validateSiting` applies to `requiresDeposit`, and for the identical reason: the kind
+ * space is open (owned by `generation.ts`'s registry, which this module does not
+ * import), so the one thing knowable HERE is that an empty name can never match a
+ * registered curve. Left unchecked, an empty string would present as "this generator's
+ * output is silently unresolvable" three modules downstream at `currentOutputWh`,
+ * rather than a load-time defect naming the exact field.
+ *
+ * Whether `kind` actually IS registered is deliberately NOT checked here — this module
+ * cannot know, and does not try to; see `generation.ts`'s `currentOutputWh`.
+ */
+function validatePowerOutputModel(id: string, kind: string): void {
+  if (kind.length === 0) {
+    throw new RangeError(`Structure "${id}": powerOutputModel must be a non-empty string when present`)
+  }
+}
+
+/**
+ * Every field `StructureTypeSpec` declares. This is the allow-list `validateAndFreeze`
+ * checks a spec's own keys against, and it is maintained BY HAND — TypeScript erases
+ * interfaces at runtime, so there is no way to derive "every key of `StructureTypeSpec`"
+ * from the type itself. That hand-maintenance is a deliberate cost, not an oversight:
+ * see `validateAndFreeze`'s return statement, which builds the validated object field by
+ * field rather than by spreading. Adding a field to `StructureTypeSpec` without adding
+ * it here means every legitimately authored spec using that field now fails loudly at
+ * `createCatalog` with "unknown property" — annoying, but a five-second fix pointed at
+ * by a clear error, and the honest alternative to the field silently riding through
+ * unvalidated and aliased, which is the defect this whole guard exists to close
+ * (aic-xm5).
+ */
+const KNOWN_SPEC_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'name',
+  'footprint',
+  'buildTurns',
+  'produces',
+  'consumes',
+  'buildCost',
+  'siting',
+  'storageCapacity',
+  'standbyConsumes',
+  'priorityClass',
+  'powerOutputModel',
+  'habitatCapacity',
+])
+
+/**
+ * Reject any property the spec carries that this module does not know how to
+ * validate, default, or copy.
+ *
+ * This is the other half of the validation boundary, not a cosmetic tidy-up. Before
+ * this guard, `validateAndFreeze` built the validated entry via `{ ...specification,
+ * ... }`: any property the caller's object carried but this module had never heard of
+ * rode straight through the spread into the "validated" result, unchecked and — for
+ * anything object-shaped — ALIASED to the caller's own reference rather than copied.
+ * A catalog that claims "validated once, trusted forever" while silently admitting
+ * arbitrary unvalidated, mutable data is not validating anything.
+ *
+ * REJECT rather than silently drop, deliberately: catalog content is authored, not
+ * player input (see `createCatalog`'s own doc comment), so a typo'd field name
+ * (`buldCost` instead of `buildCost`) is a build-time authoring defect. Dropping it
+ * would make that structure's intended cost simply vanish with no error anywhere —
+ * "my structure does nothing" discovered by a designer three turns into a playtest,
+ * instead of a RangeError naming the exact field at load time. Loud-and-early is the
+ * same trade this module already makes for every other malformed-data case.
+ */
+function validateNoUnknownProperties(id: string, specification: StructureTypeSpec): void {
+  for (const key of Object.keys(specification)) {
+    if (!KNOWN_SPEC_KEYS.has(key)) {
+      throw new RangeError(
+        `Structure "${id}": unknown property "${key}" — StructureTypeSpec has no such ` +
+          'field. Check for a typo in the field name, or update KNOWN_SPEC_KEYS in ' +
+          'catalog.ts if this is a deliberately new field.',
+      )
+    }
+  }
+}
+
 function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   const { id } = specification
 
   if (id.length === 0) {
     throw new RangeError('Structure id must be a non-empty string')
   }
+
+  validateNoUnknownProperties(id, specification)
 
   // Resolve the optional authoring fields ONCE, before validation, so the value
   // that gets validated is exactly the value that gets stored. Validating
@@ -482,6 +604,7 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   const storageCapacity = specification.storageCapacity ?? {}
   const standbyConsumes = specification.standbyConsumes ?? {}
   const priorityClass = specification.priorityClass ?? PRIORITY_DEFAULT
+  const powerOutputModel = specification.powerOutputModel ?? CONSTANT_OUTPUT_KIND
 
   validateFootprint(id, specification.footprint)
   assertNonNegativeInteger(specification.buildTurns, `Structure "${id}": buildTurns`)
@@ -497,17 +620,27 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   validateResourceAmounts(id, standbyConsumes, 'standbyConsumes')
   validateStandbyConsumes(id, standbyConsumes, specification.consumes)
   validateSiting(id, siting)
+  validatePowerOutputModel(id, powerOutputModel)
 
-  // Defensive copy of every mutable member: a catalog that aliases caller-owned
-  // arrays or objects can be corrupted after it has already been validated —
-  // including corrupted into a state that could never have passed validation, such
-  // as a negative buildCost. Every map below is copied, not just the pre-existing
-  // ones, and one authored object shared across two entries yields two independent
-  // copies. `siting` is flat today so a spread copies it fully; if it ever gains a
-  // nested member (a slope range, a latitude band) this copy must deepen with it.
+  // Built EXPLICITLY, field by field — never `{ ...specification, ... }`. A spread
+  // here would undo both `validateNoUnknownProperties` above (any property TypeScript
+  // didn't statically catch would still ride through at runtime) and every defensive
+  // copy below (any field not individually re-assigned after the spread would alias
+  // the caller's own reference instead of copying it). Listing every field also means
+  // adding one to `StructureTypeSpec` is a compile error HERE until a deliberate
+  // decision is made about whether and how to copy it — the type checker enforces
+  // that this object stays exhaustive, the same way `KNOWN_SPEC_KEYS` has to be
+  // extended by hand for the property to be accepted at all.
+  //
+  // Every mutable member is copied, not just the pre-existing ones, and one authored
+  // object shared across two entries yields two independent copies. `siting` is flat
+  // today so a spread copies it fully; if it ever gains a nested member (a slope
+  // range, a latitude band) this copy must deepen with it.
   return {
-    ...specification,
+    id: specification.id,
+    name: specification.name,
     footprint: specification.footprint.map(({ dx, dy }) => ({ dx, dy })),
+    buildTurns: specification.buildTurns,
     produces: { ...specification.produces },
     consumes: { ...specification.consumes },
     buildCost: { ...buildCost },
@@ -515,6 +648,8 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
     storageCapacity: { ...storageCapacity },
     standbyConsumes: { ...standbyConsumes },
     priorityClass,
+    powerOutputModel,
+    habitatCapacity: specification.habitatCapacity,
   }
 }
 

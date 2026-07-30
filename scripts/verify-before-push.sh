@@ -11,13 +11,16 @@ if [[ "$BRANCH" == wip/* ]]; then
   exit 0
 fi
 
-echo "=== Step 1/3: Lint ==="
-npm run lint || { echo "FAILED: Lint errors found"; exit 1; }
-
-echo "=== Step 2/3: Build ==="
-npm run build || { echo "FAILED: Build errors found"; exit 1; }
-
-echo "=== Step 3/3: Test ==="
-npm test || { echo "FAILED: Tests failed"; exit 1; }
+# Single definition of the gate: typecheck -> lint -> build -> test:coverage.
+# This MUST stay `npm run verify`, not a hand-rolled list of steps. Re-listing
+# steps here is exactly how this script and CI drifted from the real gate
+# before (aic-hfp): this script used to skip typecheck entirely and run
+# `npm test` instead of `npm run test:coverage`, so the 80/70/60 coverage
+# thresholds (Constitution §1) were never enforced before a push, and type
+# errors confined to tests/ (which `npm run build` never compiles) slipped
+# through. If `npm run verify` gains or loses a step, this script picks it up
+# automatically instead of silently falling further behind.
+echo "=== Running npm run verify (typecheck, lint, build, test:coverage) ==="
+npm run verify || { echo "FAILED: npm run verify did not pass"; exit 1; }
 
 echo "=== All checks passed ==="

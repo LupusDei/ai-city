@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AI City — MVP Design Proposal: Mars Colony Builder</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  /* DARK token set — the default. AA contrast against the dark surfaces below. */
+  .proposal-root {
+    --page-bg: #0d1117;
+    --doc-bg: #161b22;
+    --doc-border: #30363d;
+    --text: #e6edf3;
+    --heading: #f0f6fc;
+    --muted: #9da7b3;
+    --rule: #30363d;
+    --link: #79c0ff;
+    --code-bg: #1f2630;
+    --code-text: #e6edf3;
+    --pre-bg: #010409;
+    --pre-text: #e6edf3;
+    --quote-text: #b3bcc7;
+    --th-bg: #1f2630;
+    --toggle-bg: #21262d;
+    --toggle-border: #30363d;
+    --toggle-text: #e6edf3;
+    --focus: #79c0ff;
+  }
+
+  /* LIGHT token set — applied when the OS prefers light, OR (below) when toggled. */
+  @media (prefers-color-scheme: light) {
+    .proposal-root {
+      --page-bg: #f6f8fa;
+      --doc-bg: #ffffff;
+      --doc-border: #d0d7de;
+      --text: #1f2328;
+      --heading: #11161c;
+      --muted: #57606a;
+      --rule: #eaecef;
+      --link: #0969da;
+      --code-bg: #eff1f3;
+      --code-text: #1f2328;
+      --pre-bg: #1f2328;
+      --pre-text: #f6f8fa;
+      --quote-text: #57606a;
+      --th-bg: #f6f8fa;
+      --toggle-bg: #ffffff;
+      --toggle-border: #d0d7de;
+      --toggle-text: #1f2328;
+      --focus: #0969da;
+    }
+  }
+
+  /* Manual override: checking the toggle forces the LIGHT token set regardless of OS.
+     Authored last + sibling-scoped so the explicit user choice beats the media query. */
+  .proposal-doc__theme-input:checked ~ .proposal-root {
+    --page-bg: #f6f8fa;
+    --doc-bg: #ffffff;
+    --doc-border: #d0d7de;
+    --text: #1f2328;
+    --heading: #11161c;
+    --muted: #57606a;
+    --rule: #eaecef;
+    --link: #0969da;
+    --code-bg: #eff1f3;
+    --code-text: #1f2328;
+    --pre-bg: #1f2328;
+    --pre-text: #f6f8fa;
+    --quote-text: #57606a;
+    --th-bg: #f6f8fa;
+    --toggle-bg: #ffffff;
+    --toggle-border: #d0d7de;
+    --toggle-text: #1f2328;
+    --focus: #0969da;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-text-size-adjust: 100%;
+  }
+  .proposal-root {
+    min-height: 100vh;
+    background: var(--page-bg);
+    color: var(--text);
+  }
+
+  /* The hidden checkbox driving the CSS-only toggle. Kept off-screen (not display:none)
+     so it stays reachable by keyboard/AT; the visible affordance is its <label>. */
+  .proposal-doc__theme-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .proposal-doc__theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--toggle-border);
+    border-radius: 999px;
+    background: var(--toggle-bg);
+    color: var(--toggle-text);
+  }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--light { display: none; }
+  .proposal-doc__theme-toggle .proposal-doc__theme-icon--dark { display: inline; }
+  /* When toggled to light, show the ☀ affordance (and vice-versa). */
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--dark { display: none; }
+  .proposal-doc__theme-input:checked ~ .proposal-root .proposal-doc__theme-icon--light { display: inline; }
+  /* Visible focus ring for keyboard users (the toggle is the only interactive control). */
+  .proposal-doc__theme-input:focus-visible ~ .proposal-root .proposal-doc__theme-toggle,
+  .proposal-doc__theme-toggle:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .proposal-doc {
+    max-width: 46rem;
+    margin: 2.5rem auto;
+    padding: 2.5rem 3rem;
+    background: var(--doc-bg);
+    border: 1px solid var(--doc-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(1, 4, 9, 0.4);
+  }
+  .proposal-doc h1, .proposal-doc h2, .proposal-doc h3,
+  .proposal-doc h4, .proposal-doc h5, .proposal-doc h6 {
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+    font-weight: 600;
+    color: var(--heading);
+  }
+  .proposal-doc h1 { font-size: 2rem; margin-top: 0; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc h2 { font-size: 1.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .proposal-doc p, .proposal-doc ul, .proposal-doc ol, .proposal-doc blockquote, .proposal-doc table {
+    margin: 0 0 1rem;
+  }
+  .proposal-doc a { color: var(--link); text-decoration: none; }
+  .proposal-doc a:hover { text-decoration: underline; }
+  .proposal-doc a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+  .proposal-doc code, .proposal-doc pre, .proposal-doc kbd, .proposal-doc samp {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .proposal-doc code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .proposal-doc pre {
+    background: var(--pre-bg);
+    color: var(--pre-text);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow: auto;
+  }
+  .proposal-doc pre code { background: transparent; padding: 0; color: inherit; }
+  .proposal-doc blockquote {
+    margin-left: 0;
+    padding: 0.2em 1rem;
+    color: var(--quote-text);
+    border-left: 0.25em solid var(--doc-border);
+  }
+  .proposal-doc table { border-collapse: collapse; width: 100%; }
+  .proposal-doc th, .proposal-doc td { border: 1px solid var(--doc-border); padding: 0.5em 0.75em; text-align: left; }
+  .proposal-doc th { background: var(--th-bg); font-weight: 600; }
+  .proposal-doc img, .proposal-doc svg { max-width: 100%; height: auto; }
+  .proposal-doc hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .proposal-doc__header { margin-bottom: 1.5rem; }
+  .proposal-doc__title { font-size: 2rem; font-weight: 600; margin: 0; color: var(--heading); }
+  .proposal-doc__meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .proposal-doc__theme-toggle { transition: background 0.15s ease, color 0.15s ease; }
+  }
+</style>
+</head>
+<body>
+<input type="checkbox" id="proposal-theme-toggle" class="proposal-doc__theme-input" aria-label="Toggle light or dark theme">
+<div class="proposal-root">
+<label for="proposal-theme-toggle" class="proposal-doc__theme-toggle">
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--dark" aria-hidden="true">☾</span>
+<span class="proposal-doc__theme-icon proposal-doc__theme-icon--light" aria-hidden="true">☀</span>
+<span>Theme</span>
+</label>
+<main class="proposal-doc">
+<header class="proposal-doc__header">
+<h1 class="proposal-doc__title">AI City — MVP Design Proposal: Mars Colony Builder</h1>
+<div class="proposal-doc__meta">product proposal</div>
+</header>
+<article>
+<style>
+  :root {
+    --bg:#17120F; --surface:#211A16; --surface-2:#2B221C;
+    --ink:#EFE5DB; --ink-soft:#B3A296; --rule:#3C3129;
+    --iron:#E88055; --inst:#79BDD8; --amber:#E3AB55; --good:#8CC182;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#F2EBE4; --surface:#FBF7F2; --surface-2:#E8DFD6;
+      --ink:#241C17; --ink-soft:#665950; --rule:#D9CDC2;
+      --iron:#A33C1B; --inst:#1B5E78; --amber:#8A5D0C; --good:#3D6B38;
+    }
+  }
+  .doc {
+    background:var(--bg); color:var(--ink);
+    font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size:17px; line-height:1.65;
+    padding:2.5rem 1.5rem 4rem; margin:0;
+  }
+  .doc-inner { max-width:52rem; margin:0 auto; }
+  .doc h1, .doc h2, .doc h3 { line-height:1.15; text-wrap:balance; margin:0 0 .5rem; }
+  .doc h1 { font-size:2.4rem; letter-spacing:-.02em; }
+  .doc h2 {
+    font-size:1.55rem; letter-spacing:-.015em; margin-top:3rem;
+    padding-top:.9rem; border-top:2px solid var(--iron);
+  }
+  .doc h3 { font-size:1.15rem; margin-top:1.75rem; }
+  .doc p, .doc ul, .doc ol { margin:0 0 1rem; }
+  .doc a { color:var(--inst); }
+  .doc a:focus-visible, .doc :focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-soft); margin:0 0 .35rem;
+  }
+  .lede { font-size:1.22rem; line-height:1.5; color:var(--ink); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric:tabular-nums; }
+  .doc blockquote {
+    margin:1.5rem 0; padding:.15rem 0 .15rem 1.25rem;
+    border-left:3px solid var(--iron); color:var(--ink);
+  }
+  .doc blockquote.inst { border-left-color:var(--inst); }
+  .figure { margin:1.75rem 0; }
+  .figure svg { display:block; width:100%; height:auto; background:var(--surface); border:1px solid var(--rule); }
+  .figcap {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.74rem; letter-spacing:.06em; color:var(--ink-soft);
+    margin-top:.5rem; line-height:1.5;
+  }
+  .table-wrap { overflow-x:auto; margin:1.25rem 0; }
+  .doc table { border-collapse:collapse; width:100%; font-size:.92rem; min-width:30rem; }
+  .doc th, .doc td { text-align:left; padding:.5rem .9rem .5rem 0; border-bottom:1px solid var(--rule); vertical-align:top; }
+  .doc th {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); font-weight:400;
+  }
+  .doc td.num { font-family: ui-monospace, Menlo, monospace; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stats { display:flex; flex-wrap:wrap; gap:1.5rem; margin:1.25rem 0; }
+  .stat { display:flex; flex-direction:column; }
+  .stat b {
+    font-family: ui-monospace, Menlo, monospace; font-size:1.7rem;
+    font-weight:600; letter-spacing:-.02em; line-height:1.15;
+  }
+  .stat span {
+    font-family: ui-monospace, Menlo, monospace; font-size:.7rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+  }
+  .c-iron { color:var(--iron); } .c-inst { color:var(--inst); } .c-good { color:var(--good); } .c-amber { color:var(--amber); }
+  .tag {
+    display:inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:.1rem .45rem; border:1px solid currentColor; white-space:nowrap;
+  }
+  .doc ul { padding-left:1.15rem; }
+  .doc li { margin-bottom:.5rem; }
+  .doc li::marker { color:var(--iron); }
+  .masthead { border-bottom:2px solid var(--ink); padding-bottom:1.5rem; margin-bottom:.5rem; }
+  .footer {
+    margin-top:3.5rem; padding-top:1rem; border-top:2px solid var(--ink);
+    font-family: ui-monospace, Menlo, monospace; font-size:.72rem;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between;
+  }
+  /* SVG theming */
+  .s-panel { fill:var(--surface-2); }
+  .s-rule  { stroke:var(--rule); }
+  .s-ink   { fill:var(--ink); }
+  .s-soft  { fill:var(--ink-soft); }
+  .s-iron  { fill:var(--iron); }
+  .s-inst  { fill:var(--inst); }
+  .s-amber { fill:var(--amber); }
+  .s-lbl   { font-family: ui-monospace, Menlo, monospace; font-size:11px; letter-spacing:.08em; }
+  .s-lbl-sm{ font-family: ui-monospace, Menlo, monospace; font-size:9px; letter-spacing:.06em; }
+  .s-on-fill { fill:#17120F; }
+</style>
+
+<div class="doc"><div class="doc-inner">
+
+  <header class="masthead">
+    <p class="eyebrow">Mission Design Dossier · Rev 2</p>
+    <h1>Two ships landed.<br>The third had the crew.</h1>
+    <p class="lede">A turn-based Mars colony builder. You command construction drones and two
+    nuclear reactors across a square-grid Martian surface, racing a two-year clock to raise a
+    habitat before the next wave of colonists arrives. There is nobody on the surface to help you.</p>
+  </header>
+
+  <h2>The premise does mechanical work</h2>
+  <p>Three starships departed Earth. Two arrived. The lost ship carried critical components
+  <em>and every human being</em> assigned to the mission. What survived the transit: one hold of
+  automated construction drones, one hold of nuclear reactors.</p>
+  <p>This is not just backstory — it sets the MVP's shape. <strong>The colony is unmanned.</strong>
+  There are no residents to feed, no population to grow, no life support to balance. The entire
+  game becomes a construction and logistics race against a deadline, which is a far tighter first
+  build than a full city-sim, and it gives the lost ship a reason to exist beyond flavour.</p>
+  <blockquote>
+    <p class="eyebrow">Consequence</p>
+    <p>The win condition is <strong>habitat readiness</strong>, not population. You are building
+    an empty city for people who are already on their way.</p>
+  </blockquote>
+
+  <h2>The turn is a drone duty cycle</h2>
+  <p>Drones work for 25 hours, then require a full day on the charger. That cycle <em>is</em> the
+  turn — the clock is measured in robot shifts, not calendar days. A Martian sol runs 24 h 39 m,
+  so a drone works fractionally longer than one Mars day and rests for almost exactly one more.</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 720 150" role="img" aria-label="One turn spans 25 hours of drone work followed by 24.66 hours of recharging, totalling 49.66 hours or 2.014 Martian sols.">
+      <rect x="0" y="0" width="720" height="150" class="s-panel"></rect>
+      <rect x="30" y="34" width="343" height="52" class="s-iron"></rect>
+      <rect x="373" y="34" width="338" height="52" class="s-inst"></rect>
+      <g class="s-on-fill">
+        <text x="201" y="65" class="s-lbl" text-anchor="middle">WORK · 25 h</text>
+        <text x="542" y="65" class="s-lbl" text-anchor="middle">RECHARGE · 24.66 h</text>
+      </g>
+      <g class="s-rule" stroke-width="1">
+        <line x1="30" y1="92" x2="30" y2="104"></line>
+        <line x1="373" y1="92" x2="373" y2="104"></line>
+        <line x1="711" y1="92" x2="711" y2="104"></line>
+      </g>
+      <g class="s-soft">
+        <text x="30" y="118" class="s-lbl-sm">T+0</text>
+        <text x="373" y="118" class="s-lbl-sm" text-anchor="middle">T+25 h</text>
+        <text x="711" y="118" class="s-lbl-sm" text-anchor="end">T+49.66 h</text>
+        <text x="30" y="24" class="s-lbl-sm">ONE TURN · ONE DUTY CYCLE · 2.014 SOLS</text>
+      </g>
+      <g class="s-soft">
+        <text x="711" y="140" class="s-lbl-sm" text-anchor="end">DUTY CYCLE 50.3%</text>
+      </g>
+    </svg>
+    <p class="figcap">Fig 1 — The turn, drawn to scale against a Martian sol (24 h 39 m).</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b class="c-iron">2.014</b><span>Sols per turn</span></div>
+    <div class="stat"><b>50.3%</b><span>Duty cycle</span></div>
+    <div class="stat"><b class="c-inst">352</b><span>Turns to deadline</span></div>
+  </div>
+
+  <p>Two Earth years of mission time therefore buys you <strong>352 turns</strong>. That is the
+  entire budget. Every structure you queue spends some of it.</p>
+
+  <blockquote class="inst">
+    <p class="eyebrow">The mechanic this unlocks — needs your confirmation</p>
+    <p>Drones recharge on <strong>colony power</strong>. So the reactor budget doesn't just limit
+    what you can <em>run</em> — it limits how many drones can be <strong>on shift</strong>. Power
+    and labour become the same constraint, and every reactor is implicitly a decision about
+    construction speed. This is the tension the whole MVP rests on, and it falls straight out of
+    the duty-cycle rule.</p>
+  </blockquote>
+
+  <h2>The loop</h2>
+  <p>Five beats. The player is always trading power against build time against the shrinking clock.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Phase</th><th>Player action</th><th>What the sim resolves</th></tr></thead>
+      <tbody>
+        <tr><td class="num">01</td><td>Survey the surface, choose two landing sites</td><td>Terrain generated from a seed; starting inventory set by the surviving holds</td></tr>
+        <tr><td class="num">02</td><td>Queue structures onto the grid</td><td>Placement validated — footprint in bounds, tiles unoccupied, terrain buildable</td></tr>
+        <tr><td class="num">03</td><td>Assign drones to the queue</td><td>Labour capacity = 25 robot-hours × drones on shift</td></tr>
+        <tr><td class="num">04</td><td>End the cycle</td><td>Construction advances, ledger nets production against draw, clock ticks</td></tr>
+        <tr><td class="num">05</td><td>Read the report, adapt</td><td>Brownouts flagged, completions announced, turns remaining recomputed</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>One constraint now, five later</h2>
+  <p>The MVP binds on <strong>electricity alone</strong>. Everything else is deferred — but the
+  resource ledger is built resource-agnostic from day one, so the later constraints arrive as data
+  entries rather than a rewrite.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Resource</th><th>Status</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>Electricity</td><td><span class="tag c-iron">MVP</span></td><td>Reactor output; runs structures and recharges drones</td></tr>
+        <tr><td>Silica</td><td><span class="tag c-inst">Later</span></td><td>Solar panels and habitat glass</td></tr>
+        <tr><td>Oxygen</td><td><span class="tag c-inst">Later</span></td><td>Habitat atmosphere for the arriving wave</td></tr>
+        <tr><td>Hydrogen</td><td><span class="tag c-inst">Later</span></td><td>Fuel and water synthesis</td></tr>
+        <tr><td>Carbon</td><td><span class="tag c-inst">Later</span></td><td>Feedstock and polymers</td></tr>
+        <tr><td>Metals</td><td><span class="tag c-inst">Later</span></td><td>Structural fabrication</td></tr>
+        <tr><td>Credits</td><td><span class="tag c-inst">Later</span></td><td>Emergency resupply launched from Earth</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Already proven in the codebase: a test registers three invented resource kinds and passes with
+  zero source changes. If that test ever needs an edit, the data-driven design has regressed.</p>
+
+  <h2>Structures occupy real shapes</h2>
+  <p>Buildings are not uniform tiles. They range from single squares to larger, irregular
+  footprints — including L-shapes — and every footprint tile must be in bounds, unoccupied and
+  buildable, or the placement is refused outright. A rejected placement never half-writes.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Structure</th><th>Footprint</th><th>Build</th><th>Power</th><th>Capacity</th></tr></thead>
+      <tbody>
+        <tr><td>Landed starship</td><td class="num">2 × 3</td><td class="num">pre-placed</td><td class="num c-iron">+ output</td><td class="num">—</td></tr>
+        <tr><td>Fission reactor</td><td class="num">2 × 2</td><td class="num">18 turns</td><td class="num c-iron">+ 120 kW</td><td class="num">—</td></tr>
+        <tr><td>Habitat module</td><td class="num">2 × 2</td><td class="num">10 turns</td><td class="num c-inst">− 25 kW</td><td class="num">8 colonists</td></tr>
+        <tr><td>Drone charger</td><td class="num">1 × 1</td><td class="num">3 turns</td><td class="num c-inst">− 15 kW</td><td class="num">2 drones</td></tr>
+        <tr><td>Regolith processor</td><td class="num">L-shape (3)</td><td class="num">7 turns</td><td class="num c-inst">− 30 kW</td><td class="num">—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Illustrative values for balance discussion — all of it lives in a data catalog, not in code,
+  so tuning is a config edit.</p>
+
+  <h2>Screen one — surface survey</h2>
+  <p>The opening move. Elevation and deposits are generated from a seed, then the player sets down
+  both surviving hulls. Site choice must be consequential, so sites are scored on terrain
+  buildability, deposit proximity, and the separation between the two hulls.</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 720 430" role="img" aria-label="Survey screen: a generated Martian elevation map with a reference grid, mineral deposit markers, and two landing sites placed for the drone hold and the reactor hold.">
+      <rect x="0" y="0" width="720" height="430" fill="#1B1512"></rect>
+      
+      <rect x="0" y="26" width="720" height="404" fill="#3A2A26"></rect>
+      <path d="M0,150 C120,110 210,175 320,160 C430,145 520,95 620,120 C670,133 700,150 720,145 L720,430 L0,430 Z" fill="#6E3E2C"></path>
+      <path d="M0,232 C110,200 190,255 300,246 C410,237 505,198 605,222 C660,235 700,250 720,244 L720,430 L0,430 Z" fill="#9A5A3A"></path>
+      <path d="M60,326 C150,296 250,338 350,330 C450,322 540,292 640,312 L660,430 L40,430 Z" fill="#C08551"></path>
+      <path d="M180,392 C250,372 330,398 410,392 C470,387 520,374 560,382 L570,430 L170,430 Z" fill="#DEB68A"></path>
+      
+      <g stroke="#0F0B09" stroke-opacity="0.22" stroke-width="1">
+        <line x1="60" y1="26" x2="60" y2="430"></line><line x1="120" y1="26" x2="120" y2="430"></line>
+        <line x1="180" y1="26" x2="180" y2="430"></line><line x1="240" y1="26" x2="240" y2="430"></line>
+        <line x1="300" y1="26" x2="300" y2="430"></line><line x1="360" y1="26" x2="360" y2="430"></line>
+        <line x1="420" y1="26" x2="420" y2="430"></line><line x1="480" y1="26" x2="480" y2="430"></line>
+        <line x1="540" y1="26" x2="540" y2="430"></line><line x1="600" y1="26" x2="600" y2="430"></line>
+        <line x1="660" y1="26" x2="660" y2="430"></line>
+        <line x1="0" y1="76" x2="720" y2="76"></line><line x1="0" y1="126" x2="720" y2="126"></line>
+        <line x1="0" y1="176" x2="720" y2="176"></line><line x1="0" y1="226" x2="720" y2="226"></line>
+        <line x1="0" y1="276" x2="720" y2="276"></line><line x1="0" y1="326" x2="720" y2="326"></line>
+        <line x1="0" y1="376" x2="720" y2="376"></line>
+      </g>
+      
+      <rect x="0" y="0" width="720" height="26" fill="#241C17"></rect>
+      <g fill="#B3A296" class="s-lbl-sm">
+        <text x="12" y="17">SURVEY · QUAD 14-N</text>
+        <text x="210" y="17">SEED A7-3391</text>
+        <text x="340" y="17">SHIPS TO PLACE 0 / 2</text>
+        <text x="708" y="17" text-anchor="end">DETERMINISTIC — SAME SEED, SAME MAP</text>
+      </g>
+      
+      <g fill="none" stroke="#79BDD8" stroke-width="2">
+        <circle cx="150" cy="290" r="9"></circle><circle cx="268" cy="205" r="9"></circle>
+        <circle cx="452" cy="268" r="9"></circle><circle cx="560" cy="182" r="9"></circle>
+        <circle cx="640" cy="330" r="9"></circle>
+      </g>
+      <g stroke="#79BDD8" stroke-width="2">
+        <line x1="145" y1="290" x2="155" y2="290"></line><line x1="263" y1="205" x2="273" y2="205"></line>
+        <line x1="447" y1="268" x2="457" y2="268"></line><line x1="555" y1="182" x2="565" y2="182"></line>
+        <line x1="635" y1="330" x2="645" y2="330"></line>
+      </g>
+      
+      <g stroke="#F0E6DC" stroke-width="3" fill="none">
+        <rect x="196" y="246" width="60" height="50"></rect><rect x="484" y="196" width="60" height="50"></rect>
+      </g>
+      <g stroke="#160F0C" stroke-width="1.25" fill="none">
+        <rect x="196" y="246" width="60" height="50"></rect><rect x="484" y="196" width="60" height="50"></rect>
+      </g>
+      <rect x="196" y="230" width="52" height="16" fill="#160F0C"></rect>
+      <rect x="484" y="180" width="34" height="16" fill="#160F0C"></rect>
+      <g fill="#F0E6DC" class="s-lbl-sm">
+        <text x="201" y="242">DRONE</text><text x="489" y="192">RX</text>
+      </g>
+      
+      <rect x="0" y="386" width="238" height="44" fill="#160F0C" fill-opacity="0.86"></rect>
+      <g fill="#B3A296" class="s-lbl-sm">
+        <text x="12" y="402">BUILDABLE 91%   DEPOSITS 2.4 km</text>
+        <text x="12" y="418">SEPARATION 7.1 km   <tspan fill="#E88055">SITE SCORE 84</tspan></text>
+      </g>
+    </svg>
+    <p class="figcap">Fig 2 — Surface survey. Rings mark mineral deposits; the two framed cells are
+    the landed hulls. Flat ground near deposits scores well; hulls landed far apart are penalised.</p>
+  </div>
+
+  <h2>Screen two — colony operations</h2>
+  <p>The main view, and where the player spends the game. Grid centre, live constraint meters top,
+  build tray right, construction queue bottom. Everything that can bite you — power margin, drones
+  on shift, turns remaining — stays visible at all times.</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 720 452" role="img" aria-label="Colony operations screen: a status bar showing turn 118 of 352, power 96 of 120 kilowatts and 6 drones on shift; a build grid containing two landed ships, a reactor, a completed habitat and a habitat under construction; a build tray; and a construction queue.">
+      <rect x="0" y="0" width="720" height="452" class="s-panel"></rect>
+      
+      <rect x="0" y="0" width="720" height="30" fill="#241C17"></rect>
+      <g class="s-lbl-sm" fill="#EFE5DB">
+        <text x="12" y="19">TURN 118 / 352</text>
+        <text x="118" y="19" fill="#B3A296">SOL 237</text>
+        <text x="196" y="19" fill="#E88055">POWER 96 / 120 kW</text>
+        <text x="350" y="19" fill="#79BDD8">DRONES 6 ON SHIFT</text>
+        <text x="500" y="19" fill="#EFE5DB">HABITAT 24 / 60</text>
+        <text x="708" y="19" fill="#B3A296" text-anchor="end">233 LEFT</text>
+      </g>
+      
+      <g stroke="#0F0B09" stroke-opacity="0.30" stroke-width="1" fill="none">
+        <rect x="12" y="42" width="540" height="336"></rect>
+        <line x1="102" y1="42" x2="102" y2="378"></line><line x1="192" y1="42" x2="192" y2="378"></line>
+        <line x1="282" y1="42" x2="282" y2="378"></line><line x1="372" y1="42" x2="372" y2="378"></line>
+        <line x1="462" y1="42" x2="462" y2="378"></line>
+        <line x1="12" y1="98" x2="552" y2="98"></line><line x1="12" y1="154" x2="552" y2="154"></line>
+        <line x1="12" y1="210" x2="552" y2="210"></line><line x1="12" y1="266" x2="552" y2="266"></line>
+        <line x1="12" y1="322" x2="552" y2="322"></line>
+      </g>
+      
+      <rect x="14" y="44" width="86" height="108" fill="#241C17" stroke="#EFE5DB"></rect>
+      <text x="57" y="94" class="s-lbl-sm" fill="#EFE5DB" text-anchor="middle">SHIP</text>
+      <text x="57" y="108" class="s-lbl-sm" fill="#B3A296" text-anchor="middle">DRONE</text>
+
+      <rect x="194" y="100" width="86" height="108" class="s-iron" stroke="#241C17"></rect>
+      <text x="237" y="150" class="s-lbl-sm" fill="#241C17" text-anchor="middle">RX-1</text>
+      <text x="237" y="164" class="s-lbl-sm" fill="#241C17" text-anchor="middle">+120 kW</text>
+
+      <rect x="374" y="156" width="86" height="108" class="s-inst" stroke="#241C17"></rect>
+      <text x="417" y="206" class="s-lbl-sm" fill="#241C17" text-anchor="middle">HAB-1</text>
+      <text x="417" y="220" class="s-lbl-sm" fill="#241C17" text-anchor="middle">DONE</text>
+
+      <rect x="104" y="268" width="86" height="108" fill="none" stroke="#E3AB55" stroke-width="2" stroke-dasharray="6 4"></rect>
+      <text x="147" y="316" class="s-lbl-sm" fill="#E3AB55" text-anchor="middle">HAB-2</text>
+      <text x="147" y="330" class="s-lbl-sm" fill="#E3AB55" text-anchor="middle">4 / 10</text>
+
+      <rect x="464" y="268" width="86" height="108" fill="#241C17" stroke="#EFE5DB"></rect>
+      <text x="507" y="318" class="s-lbl-sm" fill="#EFE5DB" text-anchor="middle">SHIP</text>
+      <text x="507" y="332" class="s-lbl-sm" fill="#B3A296" text-anchor="middle">RX</text>
+
+      
+      <line x1="566" y1="42" x2="566" y2="378" class="s-rule" stroke-width="1"></line>
+      <text x="578" y="56" class="s-lbl-sm s-soft">BUILD TRAY</text>
+      <g class="s-lbl-sm">
+        <rect x="578" y="66" width="130" height="34" fill="none" class="s-rule" stroke-width="1"></rect>
+        <text x="586" y="80" class="s-ink">Habitat module</text><text x="586" y="93" class="s-soft">2×2 · 10 t · −25 kW</text>
+        <rect x="578" y="108" width="130" height="34" fill="none" class="s-rule" stroke-width="1"></rect>
+        <text x="586" y="122" class="s-ink">Fission reactor</text><text x="586" y="135" class="s-soft">2×2 · 18 t · +120 kW</text>
+        <rect x="578" y="150" width="130" height="34" fill="none" class="s-rule" stroke-width="1"></rect>
+        <text x="586" y="164" class="s-ink">Drone charger</text><text x="586" y="177" class="s-soft">1×1 · 3 t · −15 kW</text>
+        <rect x="578" y="192" width="130" height="34" fill="none" class="s-rule" stroke-width="1"></rect>
+        <text x="586" y="206" class="s-ink">Regolith proc.</text><text x="586" y="219" class="s-soft">L · 7 t · −30 kW</text>
+      </g>
+      
+      <text x="578" y="264" class="s-lbl-sm s-soft">POWER 80%</text>
+      <rect x="578" y="270" width="130" height="8" fill="none" class="s-rule" stroke-width="1"></rect>
+      <rect x="578" y="270" width="104" height="8" class="s-iron"></rect>
+      <text x="578" y="300" class="s-lbl-sm s-soft">LABOUR 62%</text>
+      <rect x="578" y="306" width="130" height="8" fill="none" class="s-rule" stroke-width="1"></rect>
+      <rect x="578" y="306" width="81" height="8" class="s-inst"></rect>
+      
+      <line x1="0" y1="392" x2="720" y2="392" class="s-rule" stroke-width="1"></line>
+      <g class="s-lbl-sm">
+        <text x="12" y="414" class="s-soft">QUEUE</text>
+        <text x="70" y="414" class="s-amber">HAB-2 · 4/10 turns</text>
+        <text x="230" y="414" class="s-amber">CHARGER-3 · 1/3 turns</text>
+        <rect x="588" y="400" width="120" height="24" fill="none" class="s-rule" stroke-width="1"></rect>
+        <text x="648" y="416" class="s-ink" text-anchor="middle">END CYCLE ▸</text>
+      </g>
+    </svg>
+    <p class="figcap">Fig 3 — Colony operations. Dashed outline = under construction and producing
+    nothing yet. Power and labour meters are deliberately adjacent, because they are the same decision.</p>
+  </div>
+
+  <h2>Screen three — cycle report</h2>
+  <p>Ending a cycle produces a readable account of what changed, so the player learns the system by
+  watching it respond. Brownouts are stated plainly, with cause and fix — never a bare error.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Event</th><th>Report line</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag c-good">Complete</span></td><td>HAB-1 finished. Habitat capacity 16 → 24.</td></tr>
+        <tr><td><span class="tag c-amber">Brownout</span></td><td>Draw 132 kW exceeded output 120 kW. Regolith processor idled to protect drone charging.</td></tr>
+        <tr><td><span class="tag c-inst">Labour</span></td><td>6 drones × 25 h = 150 robot-hours applied. 2 drones held offline — insufficient charge capacity.</td></tr>
+        <tr><td><span class="tag c-iron">Clock</span></td><td>Turn 118 → 119. <strong>233 turns remaining.</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <blockquote>
+    <p class="eyebrow">Design rule</p>
+    <p>Brownouts must be deterministic and explainable. Which structure idles first is a documented
+    priority order — never whatever the iteration order happened to be.</p>
+  </blockquote>
+
+  <h2>Win, lose, and the shape of failure</h2>
+  <p><strong>Victory:</strong> habitat capacity meets or exceeds the arriving wave when the clock
+  expires. Only <em>completed</em> structures count — a habitat at 9/10 turns houses nobody.</p>
+  <p><strong>Defeat:</strong> the deadline arrives short of capacity. The colonists are already in
+  transit; there is no extension.</p>
+  <p>The interesting failure isn't running out of turns — it's <strong>over-building habitats
+  early</strong>, starving the power budget, dropping drones off shift, and watching the build rate
+  collapse with 200 turns left and no way to recover. That death spiral is the game.</p>
+
+  <h2>What already exists</h2>
+  <p>The simulation core is being built test-first, ahead of any rendering, because a colony sim
+  whose turns aren't reproducible cannot be balanced, saved, or debugged.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Component</th><th>State</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr><td>Toolchain &amp; coverage gates</td><td><span class="tag c-good">Shipped</span></td><td>Gate proven to fail by negative control</td></tr>
+        <tr><td>Square grid world model</td><td><span class="tag c-good">Shipped</span></td><td>25 tests · 100% coverage</td></tr>
+        <tr><td>Structure catalog + footprints</td><td><span class="tag c-good">Shipped</span></td><td>31 tests · L-shapes &amp; multi-tile</td></tr>
+        <tr><td>Placement validation</td><td><span class="tag c-amber">Next</span></td><td>Unblocked</td></tr>
+        <tr><td>Resource ledger</td><td><span class="tag c-amber">Queued</span></td><td>Resource-agnostic by design</td></tr>
+        <tr><td>Drone construction &amp; power</td><td><span class="tag c-amber">Queued</span></td><td>Duty cycle now locked</td></tr>
+        <tr><td>Turn resolution + golden trace</td><td><span class="tag c-amber">Queued</span></td><td>Determinism regression</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="stats">
+    <div class="stat"><b class="c-inst">56</b><span>Tests passing</span></div>
+    <div class="stat"><b>100%</b><span>Coverage, all metrics</span></div>
+    <div class="stat"><b class="c-good">0</b><span>Known vulnerabilities</span></div>
+  </div>
+
+  <h2>What needs your call</h2>
+  <p>Working defaults are in use so nothing is blocked — but these three change the design if you
+  disagree.</p>
+  <ul>
+    <li><strong>Unmanned colony.</strong> Confirmed reading: no humans until the wave lands, so no
+    population sim in the MVP. Say the word if you intended a surviving skeleton crew with life support.</li>
+    <li><strong>Recharge draws power.</strong> Strongly recommended — it fuses the power and labour
+    constraints into one decision and is what makes reactors interesting. Confirm and it goes into the ledger.</li>
+    <li><strong>Deadline framing.</strong> Two Earth years is 352 turns. The real Earth–Mars launch
+    window is ~26 months, which would give 377 turns and make the fiction exact. Your call whether
+    realism or the round number wins.</li>
+  </ul>
+
+  <div class="footer">
+    <span>AI City · MVP Proposal</span>
+    <span>Stetmann · Research Engineering</span>
+  </div>
+
+</div></div>
+</article>
+</main>
+</div>
+</body>
+</html>
