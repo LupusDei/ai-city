@@ -153,7 +153,7 @@ export const MAP_DIMENSION = 64
  *
  * `beginSurvey` takes a `mission` override, so no test depends on this default.
  */
-export const INCOMING_WAVE_SIZE = 100
+export const INCOMING_WAVE_SIZE = 400
 
 /** The mission every session runs unless a caller states otherwise. */
 export const DEFAULT_MISSION: MissionConfig = {

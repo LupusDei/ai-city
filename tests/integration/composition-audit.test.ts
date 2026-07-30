@@ -88,6 +88,13 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // cross-file callers only — so they are orphans by its definition rather than by design,
   // the same category as `landing.scoreLandingSite` above. They are no longer decorative:
   // the square law they implement is what makes the berm cost move with the tile edge.
+  // Balance-pass surfaces (aic-oby.4): measurement and scripted-strategy code. Their
+  // production caller is scripts/balance-report.ts, which is outside src/ and therefore
+  // invisible to this scan; tests/integration/balance-pass.test.ts is the gate that
+  // proves they genuinely run.
+  'catalog-data-core.coreStructureSpecs',
+  'mission-runner.runMission',
+  'balance-strategies.createBalanceStrategies',
   'scale.tileAreaForEdgeM2',
   'scale.footprintAreaM2',
   'buildability.eligibleDepositKinds', // chains 2 and 3 deposit-gated siting
