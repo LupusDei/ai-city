@@ -35,7 +35,9 @@ function makeTerrain(
 /** A flat terrain: every tile maximally buildable, so eligibility never confounds
  * a test that is actually about deposit KIND. */
 function flatTerrain(size: number, seed: number, latitude: number): Terrain {
-  return makeTerrain(size, size, seed, new Array(size * size).fill(0.5), latitude)
+  // `new Array(n).fill(v)` is typed `any[]`, which would let a wrong element type
+  // (e.g. fill('0.5')) reach makeTerrain's `number[]` unchallenged. Explicit here.
+  return makeTerrain(size, size, seed, new Array<number>(size * size).fill(0.5), latitude)
 }
 
 /** Every distinct kind present in a deposit list, as a sorted array for stable
@@ -57,7 +59,7 @@ describe('computeBuildability', () => {
   })
 
   it('should assign maximum buildability (1) to every tile of a perfectly flat terrain', () => {
-    const flat = makeTerrain(5, 5, 1, new Array(25).fill(0.5))
+    const flat = makeTerrain(5, 5, 1, new Array<number>(25).fill(0.5))
     const map = computeBuildability(flat)
     for (const s of map.score) {
       expect(s).toBe(1)
@@ -268,7 +270,7 @@ describe('generateDeposits', () => {
   })
 
   it('should place a deposit on every eligible tile when density is 1', () => {
-    const terrain = makeTerrain(3, 3, 1, new Array(9).fill(0.5))
+    const terrain = makeTerrain(3, 3, 1, new Array<number>(9).fill(0.5))
     const deposits = generateDeposits(terrain, { density: 1, minBuildability: 0 })
     expect(deposits).toHaveLength(9)
     const coords = new Set(deposits.map((d) => `${d.x},${d.y}`))

@@ -194,7 +194,7 @@ tuning argument about tile size can quietly break the central decision.
 
 ## Phase 5: US4 — Dust deposition and global dust storms (P2)
 
-Soiling as an ongoing **labour tax** (cleaning spends the exact drone-hours wanted for
+Soiling as an ongoing **labour tax** (cleaning spends the exact whole drone-turns wanted for
 construction), and storms as a seeded, world-gen-fixed schedule that hits arrays and leaves reactors
 untouched. The asymmetry is the strategic payload: "how much of your power base do you dare put on
 sunlight" becomes a genuine decision. Determinism here is an acceptance criterion with a test, not a

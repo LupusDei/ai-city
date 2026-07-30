@@ -132,7 +132,7 @@ readout at turn 1 and at turn 250 and assert the verdict flips from "repays" to 
 Two real Martian risks turn solar from an upgrade into a bet.
 
 **Soiling** — Spirit and Opportunity both measured ~0.2% output loss per sol, ~0.4% per turn.
-Arrays decay unless drones clean them, and cleaning spends the exact drone-hours the player wants
+Arrays decay unless drones clean them, and cleaning spends the exact whole drone-turns the player wants
 for construction: an ongoing **labour tax**, not just a build cost. Cumulative soiling loss is
 capped at **60%** so an ignored array degrades badly and stays useful — it must never become a
 permanent zero, because a structure that silently reaches zero output is indistinguishable from a
@@ -158,7 +158,7 @@ array absent.
    0.4% per turn in integer basis points and is floored at 4,000 bp (60% cumulative loss),
    producing the capped output on the turn the cap is reached and every turn after.
 2. **Given** a soiled array and a cleaning order, **When** drones service it, **Then** retention
-   rises and the drone-hours spent are unavailable to construction that turn.
+   rises and the whole drone-turns spent are unavailable to construction that turn.
 3. **Given** a world generated from seed S, **When** the storm schedule is drawn, **Then** it is
    drawn from the **same seeded generator as the terrain**, is fully determined before turn 1, and
    two worlds from seed S have deep-equal schedules — asserted over the whole schedule, not just
@@ -252,7 +252,7 @@ Every one of these has a named task in `tasks.md`.
   `ceilDiv(1_200_000 Wh, 29_200 Wh/turn) = 42 turns`. See "Rounding note" below.
 - **FR-011**: Array output MUST decay by **0.4% per turn** of soiling, tracked as integer basis
   points of retention, floored at **4,000 bp** (60% cumulative loss).
-- **FR-012**: Cleaning MUST restore retention and MUST consume drone-hours from the same pool as
+- **FR-012**: Cleaning MUST restore retention and MUST consume whole drone-turns from the same pool as
   construction.
 - **FR-013**: The **entire** storm schedule (start turn, duration 10–40 turns, severity 8,000–9,500
   bp of output loss) MUST be drawn at world-gen from `terrain.seed`, using the same `mulberry32`
@@ -315,3 +315,19 @@ called out here so nobody discovers it as a bug.
   `Math.random`/`Date.now` under `src/sim/`.
 - **SC-009**: `git grep -n "pv-array\|silicon-furnace\|silica-sifter" src/sim` matches only data
   files and tests — never a conditional in simulation logic.
+
+## Standing rulings from the General (2026-07-30) — binding on this spec
+
+These override anything above that contradicts them.
+
+- **No storing energy without barriers.** Electricity does not accumulate across
+  turns; generation is spent or lost within the turn that produces it, unless an
+  explicit storage structure (battery) provides containment. The ledger therefore
+  carries a **per-resource accumulation policy** — silica, water and oxygen are
+  stocks; electricity is a flow.
+- **No storing labour at all.** No exceptions and no storage structure. Unspent
+  robot-hours are lost at end of turn, and labour is granted only in **whole
+  build-turns** (implemented, `aic-chg`). No task in this chain may cost fractional
+  labour — including solar-panel cleaning, which costs whole drone-turns.
+- **Canonical units: grams for mass, watt-hours for energy.** Integers only.
+- **Physics first, except where game mechanics and fun override.**

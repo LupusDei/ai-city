@@ -22,6 +22,9 @@ import type { Grid } from '../../src/sim/grid'
 import { validatePlacement } from '../../src/sim/placement'
 import type { ValidPlacement } from '../../src/sim/placement'
 import type { TurnCycleConfig } from '../../src/sim/time'
+// The single completion predicate (aic-zw6): `isProjectComplete` delegates to this, and
+// the suite at the end of this file pins the equivalence.
+import { isStructureComplete } from '../../src/sim/mission'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -560,5 +563,140 @@ describe('releaseTiles', () => {
     const { project, grid: occupiedGrid } = projectAt('hab-1', HAB, grid, 0, 0)
     releaseTiles(occupiedGrid, project.tiles)
     expect(tileAt(occupiedGrid, { x: 0, y: 0 })?.occupantId).toBe('hab-1')
+  })
+})
+
+describe('no storing labour (aic-chg) — whole build-turns only', () => {
+  // RULED BY THE GENERAL: "No storing labor at all." Unspent robot-hours are lost at
+  // end of turn; they are never banked on a project so it can finish a build-turn
+  // later. Labour is therefore applied only in WHOLE build-turn units, and any
+  // remainder is reported unused rather than accumulated.
+  //
+  // This also removes a real bug at the root rather than patching it.
+  // `turnsCompletedFor` floors `accumulatedLabourHours / hoursPerTurn` with NO
+  // epsilon, while `drones.ts` added FLOOR_EPSILON for exactly that hazard. Once
+  // fractional labour entered (spec 003's panel cleaning), a 1e-13 deficit would
+  // have flipped a habitat to incomplete, contributing zero capacity and losing the
+  // mission. Constraining progress to whole multiples makes the quotient exact, so
+  // no epsilon is needed — the class of error stops existing.
+  const perTurn = requiredLabourHoursPerBuildTurn(TEST_CYCLE)
+
+  function padProject() {
+    const grid = freshGrid()
+    return projectAt('p1', PAD, grid, 0, 0).project
+  }
+
+  it('should not bank a partial build-turn across turns', () => {
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 1.5)
+    expect(result.labourHoursApplied).toBe(perTurn)
+    expect(result.labourHoursUnused).toBeCloseTo(perTurn * 0.5, 9)
+    expect(turnsCompletedFor(TEST_CYCLE, result.queue[0]!)).toBe(1)
+  })
+
+  it('should make no progress at all on labour below one whole build-turn', () => {
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 0.99)
+    expect(result.labourHoursApplied).toBe(0)
+    expect(result.labourHoursUnused).toBeCloseTo(perTurn * 0.99, 9)
+    expect(turnsCompletedFor(TEST_CYCLE, result.queue[0]!)).toBe(0)
+  })
+
+  it('should keep accumulated labour an exact multiple of one build-turn', () => {
+    let queue: ConstructionQueue = [padProject()]
+    for (let turn = 0; turn < 4; turn += 1) {
+      queue = advanceConstruction(TEST_CYCLE, queue, perTurn * 1.7).queue
+      expect(queue[0]!.accumulatedLabourHours % perTurn).toBe(0)
+    }
+  })
+
+  it('should leave no floor() quotient that would need an epsilon', () => {
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 2)
+    const acc = result.queue[0]!.accumulatedLabourHours
+    expect(Number.isInteger(acc / perTurn)).toBe(true)
+    expect(turnsCompletedFor(TEST_CYCLE, result.queue[0]!)).toBe(2)
+  })
+
+  it('should not accumulate past what a project required', () => {
+    // PAD needs 5 build-turns. Fund 8; only 5 may be taken.
+    const result = advanceConstruction(TEST_CYCLE, [padProject()], perTurn * 8)
+    expect(result.labourHoursApplied).toBe(perTurn * 5)
+    expect(result.labourHoursUnused).toBe(perTurn * 3)
+    expect(isProjectComplete(TEST_CYCLE, result.queue[0]!)).toBe(true)
+  })
+})
+
+/**
+ * ONE completion predicate (aic-zw6).
+ *
+ * Three modules used to define their own — this one, `mission.ts`'s, and `power.ts`'s
+ * since-removed `isStructureOperational`. They agreed only by coincidence of three
+ * people making the same `>=` call, and the duplication had a specific expiry: spec 002
+ * FR-011 makes readiness a two-factor test, and two definitions of "built" is where the
+ * second factor gets added to one and not the other.
+ *
+ * `isProjectComplete` now delegates to `mission.ts`'s `isStructureComplete`. These tests
+ * pin the equivalence across every boundary case, so the consolidation is proven rather
+ * than asserted in a comment.
+ */
+describe('isProjectComplete — single source of truth', () => {
+  const perTurn = requiredLabourHoursPerBuildTurn(TEST_CYCLE)
+
+  function padProject(): ConstructionProject {
+    return projectAt('p1', PAD, freshGrid(), 0, 0).project
+  }
+
+  /** The comparison `isProjectComplete` used to make directly, kept here as the oracle. */
+  function byDirectComparison(project: ConstructionProject): boolean {
+    return (
+      project.accumulatedLabourHours >= totalLabourHoursRequired(project.structureType, TEST_CYCLE)
+    )
+  }
+
+  it('should agree with the direct labour comparison at every boundary', () => {
+    // PAD needs 5 build-turns. Sweep from well short to well past, including the exact
+    // boundary and one hour either side of it, plus a fractional value — the case that
+    // would have exposed a floor/epsilon disagreement between the two derivations.
+    const required = totalLabourHoursRequired(PAD, TEST_CYCLE)
+    const samples = [
+      0,
+      1,
+      required - perTurn,
+      required - 1,
+      required - 0.5,
+      required,
+      required + 0.5,
+      required + 1,
+      required + perTurn * 3,
+    ]
+
+    for (const accumulatedLabourHours of samples) {
+      const project = { ...padProject(), accumulatedLabourHours }
+      expect(isProjectComplete(TEST_CYCLE, project)).toBe(byDirectComparison(project))
+    }
+  })
+
+  it('should agree with mission.ts on the very structure it hands mission.ts', () => {
+    // The seam that matters: whatever `isProjectComplete` says, `mission.ts` must reach
+    // the same verdict about the `HabitatStructure` this module adapts for it. If these
+    // two ever disagree, a habitat could be "complete" for construction and incomplete
+    // for the win condition, or vice versa — silently losing or winning a mission.
+    for (const buildTurnsDone of [0, 1, 4, 5, 6]) {
+      const project = { ...padProject(), accumulatedLabourHours: perTurn * buildTurnsDone }
+      expect(isProjectComplete(TEST_CYCLE, project)).toBe(
+        isStructureComplete(toHabitatStructure(TEST_CYCLE, project)),
+      )
+    }
+  })
+
+  it('should treat a zero-build-turn structure as complete on arrival', () => {
+    // Pre-placed structures (a landed starship) have `buildTurns: 0`. Both derivations
+    // must agree that zero labour satisfies zero requirement — the degenerate case where
+    // a floor-based and a comparison-based rule could most easily diverge.
+    const prePlaced = createCatalog([
+      { ...PAD_SPEC, id: 'pre-placed', buildTurns: 0 },
+    ]).types.get('pre-placed')!
+    const project = { ...padProject(), structureType: prePlaced, accumulatedLabourHours: 0 }
+
+    expect(isProjectComplete(TEST_CYCLE, project)).toBe(true)
+    expect(isStructureComplete(toHabitatStructure(TEST_CYCLE, project))).toBe(true)
   })
 })

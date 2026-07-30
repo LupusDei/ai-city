@@ -230,11 +230,11 @@ reactor output is bit-identical to a run with the array absent.
       output with its soiling and storm multipliers broken out so a player can see *why* an array
       under-produced. Tests in `tests/unit/cycleReport.test.ts`: a clean turn, an overflow turn, and
       a stormed-and-idle turn.
-- [ ] T025 [P] Add cleaning orders in `src/sim/soiling.ts` — a cleaning order consumes drone-hours
-      from the same pool as construction (the **labour tax**: cleaning spends the exact drone-hours
+- [ ] T025 [P] Add cleaning orders in `src/sim/soiling.ts` — a cleaning order consumes whole drone-turns
+      from the same pool as construction (the **labour tax**: cleaning spends the exact whole drone-turns
       the player wants for building). Tests in `tests/unit/soiling.test.ts`: cleaning restores
       retention and reduces labour available for construction that turn; cleaning with zero
-      drone-hours available is refused, not partially applied; cleaning an already-clean array is a
+      whole drone-turns available is refused, not partially applied; cleaning an already-clean array is a
       no-op that spends nothing.
 - [ ] T026 [P] Document balance hooks in `docs/balance/silica-solar.md` and close the gate — every
       tuning knob (soiling rate, 60% cap, storm duration/severity ranges, array `buildTurns`) in one

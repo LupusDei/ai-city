@@ -112,6 +112,106 @@ export interface Shortfall {
   readonly amount: number
 }
 
+/**
+ * A typed report that a resource was produced but could NOT be carried across the
+ * turn boundary, and is therefore gone.
+ *
+ * The exact mirror of `Shortfall`, and it exists for the identical reason: a surplus
+ * that vanishes without a trace is the same class of bug as a stockpile silently
+ * going negative. Both are ordinary, expected simulation outcomes reported as
+ * structured data so a caller can explain them, and neither is an error.
+ *
+ * Named for the energy case because that is the motivating one and it is physically
+ * literal — surplus electricity is dumped as heat through the radiators, it does not
+ * "spill" anywhere. The concept generalises to any flow resource: this is "produced,
+ * had nowhere to go".
+ */
+export interface Vented {
+  readonly resource: string
+  readonly amount: number
+}
+
+/**
+ * A typed report that a STOCK resource was produced beyond what the colony can store,
+ * and the excess is gone (aic-7f5, spec 002 FR-003, spec 003 FR-004).
+ *
+ * Reported SEPARATELY from `Vented` rather than merged behind a discriminant, because
+ * although both mean "produced, had nowhere to go", the player's response is completely
+ * different: vented energy says build a battery, overflowing regolith says build a silo
+ * or throttle the mine. A cycle report should be able to say which happened without its
+ * reader decoding a reason code.
+ */
+export interface Overflow {
+  readonly resource: string
+  readonly amount: number
+}
+
+/**
+ * How a resource behaves across the turn boundary.
+ *
+ * RULED BY THE GENERAL (aic-96o): "No storing energy without barriers." Electricity
+ * is spent or lost within the turn that generates it, unless an explicit storage
+ * structure grants containment. Silica, water, oxygen and regolith are not like that
+ * — a pile of regolith is still there next turn whether or not anyone built a silo.
+ *
+ * So one stockpile model cannot serve every resource, and this is the distinction:
+ *
+ *   `stock` — carries over freely. The default, and correct for every mass resource.
+ *   `flow`  — carries over ONLY up to explicitly granted `storageCapacity`; anything
+ *             above that is `Vented` and gone.
+ *
+ * WHY THIS ARRIVES AS DATA AND NOT AS A BRANCH ON THE RESOURCE NAME: this module's
+ * founding contract is that resources are addressed by open string key and never by a
+ * hardcoded branch, so that a new resource kind is pure data. A `if (resource ===
+ * 'electricity')` here would break that permanently. The caller declares which
+ * resources are flows, and `ledger.ts` still does not know that electricity exists.
+ * `power.ts` owns that declaration, because `power.ts` owns electricity.
+ */
+export type AccumulationPolicy = 'stock' | 'flow'
+
+/**
+ * Per-resource accumulation rules for one `applyLedger` call.
+ *
+ * Both members are optional, and an absent policy means "every resource is a stock",
+ * which is exactly the behaviour this module had before the flow/stock distinction
+ * existed. That default is load-bearing: it keeps every pre-existing caller and test
+ * correct without modification, so adopting the policy is opt-in per call site rather
+ * than a breaking change nobody can stage.
+ */
+export interface LedgerPolicy {
+  /**
+   * Resources that are FLOWS. Anything not named here is a STOCK.
+   *
+   * A list rather than a full `Record<string, AccumulationPolicy>` because "stock" is
+   * the default for the open, unbounded key space — enumerating every stock resource
+   * would be impossible, and a map whose absent entries mean "stock" is the same
+   * information with more ways to get it wrong.
+   */
+  readonly flowResources?: readonly string[]
+  /**
+   * Storage capacity granted by the colony's completed structures, per resource, in
+   * base units — the aggregate of every operating structure's
+   * `StructureType.storageCapacity`. Consulted for BOTH flows and stocks, with one
+   * crucial difference in what ABSENCE means:
+   *
+   *   - FLOW, absent  -> capacity is ZERO. A flow cannot persist without containment;
+   *                      energy with nowhere to go dissipates within the turn.
+   *   - STOCK, absent -> capacity is UNBOUNDED. A pile of regolith sits on the ground
+   *                      whether or not anyone built a silo.
+   *
+   * That asymmetry is physical, not a convenience. An EXPLICIT `0` is a real statement
+   * in both cases and is distinct from omitting the key — matching `catalog.ts`'s rule
+   * that `storageCapacity: { regolith: 0 }` means "handles regolith, buffers none of it".
+   *
+   * KNOWN TENSION, left deliberately for whoever authors the caps: spec 002 FR-003 says
+   * every stockpile MUST have a cap, which implies the stock default should eventually be
+   * 0 rather than unbounded. Flipping it is one line here, but it is a BALANCE decision —
+   * today no structure declares any capacity, so a 0 default would mean the colony could
+   * not hold a single gram of anything and the game would be unplayable.
+   */
+  readonly storageCapacity?: Stockpile
+}
+
 /** The result of running one turn's flows against the prior stockpiles. */
 export interface LedgerResult {
   /** Per-resource production/consumption/net for this turn, sorted by resource name. */
@@ -120,10 +220,23 @@ export interface LedgerResult {
   readonly stockpiles: Stockpile
   /** Resources whose stockpile would have gone negative this turn, sorted by resource name. */
   readonly shortfalls: readonly Shortfall[]
+  /**
+   * Flow resources whose surplus could not be contained and is gone, sorted by
+   * resource name. Always empty when no flow resource was declared.
+   */
+  readonly vented: readonly Vented[]
+  /**
+   * Stock resources produced beyond the colony's storage capacity, sorted by resource
+   * name. Always empty when no stock capacity was declared.
+   */
+  readonly overflow: readonly Overflow[]
 }
 
 /** A frozen, reusable empty stockpile — the default when a colony has none yet. */
 const EMPTY_STOCKPILE: Stockpile = {}
+
+/** The default policy: every resource is a stock, i.e. the pre-flow/stock behaviour. */
+const EMPTY_POLICY: LedgerPolicy = {}
 
 /**
  * All resource keys mentioned by any flow's `produces` or `consumes`, sorted.
@@ -199,15 +312,24 @@ export function computeBalances(flows: readonly ResourceFlow[]): readonly Resour
 export function applyLedger(
   flows: readonly ResourceFlow[],
   stockpiles: Stockpile = EMPTY_STOCKPILE,
+  policy: LedgerPolicy = EMPTY_POLICY,
 ): LedgerResult {
   const balances = computeBalances(flows)
   const balanceByResource = new Map(balances.map((balance) => [balance.resource, balance]))
+
+  // Membership-only use of a Set (never enumerated for order), matching the same
+  // idiom in `drones.ts` and `power.ts`. An absent `flowResources` yields an empty
+  // set, i.e. "every resource is a stock" — the documented default.
+  const flowResources = new Set(policy.flowResources ?? [])
+  const grantedCapacity = policy.storageCapacity ?? EMPTY_STOCKPILE
 
   const resources = new Set<string>([...Object.keys(stockpiles), ...balanceByResource.keys()])
   const sortedResources = [...resources].sort()
 
   const nextStockpiles: Record<string, number> = {}
   const shortfalls: Shortfall[] = []
+  const vented: Vented[] = []
+  const overflow: Overflow[] = []
 
   for (const resource of sortedResources) {
     const previous = stockpiles[resource] ?? 0
@@ -215,12 +337,39 @@ export function applyLedger(
     const raw = previous + net
 
     if (raw < 0) {
+      // A deficit is a deficit regardless of policy: running out is running out, and
+      // there is no surplus to discard on a turn that ended short.
       shortfalls.push({ resource, amount: -raw })
       nextStockpiles[resource] = 0
-    } else {
-      nextStockpiles[resource] = raw
+      continue
     }
+
+    // `Math.min` of two integers is an integer, so neither branch below introduces
+    // division or a float; the module's no-division discipline survives intact.
+    const declaredCapacity = grantedCapacity[resource]
+
+    if (flowResources.has(resource)) {
+      // FLOW: carry over only what granted storage can contain. An ABSENT capacity is
+      // 0 — the battery-less colony — so the surplus is entirely vented and the
+      // stockpile returns to zero every turn, however many turns run.
+      const capacity = declaredCapacity ?? 0
+      const carried = Math.min(raw, capacity)
+      if (raw > carried) vented.push({ resource, amount: raw - carried })
+      nextStockpiles[resource] = carried
+      continue
+    }
+
+    // STOCK: an ABSENT capacity is UNBOUNDED (see `LedgerPolicy.storageCapacity` for
+    // why the two defaults differ, and for the FR-003 tension that leaves it this way).
+    if (declaredCapacity === undefined) {
+      nextStockpiles[resource] = raw
+      continue
+    }
+
+    const carried = Math.min(raw, declaredCapacity)
+    if (raw > carried) overflow.push({ resource, amount: raw - carried })
+    nextStockpiles[resource] = carried
   }
 
-  return { balances, stockpiles: nextStockpiles, shortfalls }
+  return { balances, stockpiles: nextStockpiles, shortfalls, vented, overflow }
 }

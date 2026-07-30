@@ -276,3 +276,19 @@ be **too cheap** to be a decision. That is acceptable — the mechanic's job is 
 readiness truthful, not to be the difficulty. The difficulty belongs in the power budget and
 the deadline, where the MVP already put it. Tune berm cost in the same balance pass as build
 durations, against real playtest traces.
+
+## Standing rulings from the General (2026-07-30) — binding on this spec
+
+These override anything above that contradicts them.
+
+- **No storing energy without barriers.** Electricity does not accumulate across
+  turns; generation is spent or lost within the turn that produces it, unless an
+  explicit storage structure (battery) provides containment. The ledger therefore
+  carries a **per-resource accumulation policy** — silica, water and oxygen are
+  stocks; electricity is a flow.
+- **No storing labour at all.** No exceptions and no storage structure. Unspent
+  robot-hours are lost at end of turn, and labour is granted only in **whole
+  build-turns** (implemented, `aic-chg`). No task in this chain may cost fractional
+  labour — including solar-panel cleaning, which costs whole drone-turns.
+- **Canonical units: grams for mass, watt-hours for energy.** Integers only.
+- **Physics first, except where game mechanics and fun override.**
