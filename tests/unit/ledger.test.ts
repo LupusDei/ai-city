@@ -105,6 +105,7 @@ describe('applyLedger', () => {
       stockpiles: {},
       shortfalls: [],
       vented: [],
+      overflow: [],
     })
   })
 
@@ -721,6 +722,109 @@ describe('applyLedger — flow resources', () => {
     applyLedger([], stockpiles, policy)
     expect(stockpiles).toEqual({ electricity: 500 })
     expect(policy).toEqual({ flowResources: ['electricity'], storageCapacity: { electricity: 100 } })
+  })
+
+  it('should cap a STOCK resource at declared capacity and report the overflow', () => {
+    // aic-7f5 / spec 002 FR-003: production beyond the cap must be capped and REPORTED
+    // as overflow, never silently discarded. A vanishing surplus is the same class of
+    // bug as a stockpile silently going negative, and it will not surface until balance
+    // work, by which point the numbers are already wrong.
+    const result = applyLedger(
+      [flow({ produces: { regolith: 60_000_000 } })],
+      { regolith: 1_000_000 },
+      { storageCapacity: { regolith: 5_000_000 } },
+    )
+    expect(result.stockpiles.regolith).toBe(5_000_000)
+    expect(result.overflow).toEqual([{ resource: 'regolith', amount: 56_000_000 }])
+  })
+
+  it('should treat an ABSENT stock capacity as unbounded, unlike a flow', () => {
+    // The asymmetry is physical, not a convenience. A flow cannot persist without
+    // containment — energy with nowhere to go dissipates — so an absent capacity means
+    // ZERO for a flow. A pile of regolith sits on the ground whether or not anyone built
+    // a silo, so an absent capacity means UNBOUNDED for a stock.
+    //
+    // NOTE the tension, deliberately left for chain 1: spec 002 FR-003 says every
+    // stockpile MUST have a cap, which implies the default should eventually be 0 rather
+    // than unbounded. Flipping it is a one-line change here, but it is a BALANCE decision
+    // that belongs with whoever authors the caps — today no structure declares any, so a
+    // 0 default would mean the colony could not hold a single gram of anything.
+    const result = applyLedger([flow({ produces: { regolith: 60_000_000 } })], {}, {})
+    expect(result.stockpiles.regolith).toBe(60_000_000)
+    expect(result.overflow).toEqual([])
+  })
+
+  it('should distinguish an explicit zero stock capacity from an absent one', () => {
+    // Mirrors `catalog.ts`'s rule that an explicit 0 storageCapacity is a real statement
+    // ("this structure handles regolith but buffers none of it"), not the same as
+    // omitting the key.
+    const result = applyLedger(
+      [flow({ produces: { regolith: 500 } })],
+      {},
+      { storageCapacity: { regolith: 0 } },
+    )
+    expect(result.stockpiles.regolith).toBe(0)
+    expect(result.overflow).toEqual([{ resource: 'regolith', amount: 500 }])
+  })
+
+  it('should report overflow separately from vented, because they are different events', () => {
+    // Both are "produced, had nowhere to go", but the player's response differs — build a
+    // battery versus build a silo or throttle a mine — so a cycle report must be able to
+    // say which happened without the reader decoding a discriminant.
+    const result = applyLedger(
+      [flow({ produces: { electricity: 1_000_000, regolith: 500 } })],
+      {},
+      { flowResources: ['electricity'], storageCapacity: { regolith: 100 } },
+    )
+    expect(result.vented).toEqual([{ resource: 'electricity', amount: 1_000_000 }])
+    expect(result.overflow).toEqual([{ resource: 'regolith', amount: 400 }])
+  })
+
+  it('should not report overflow when a stock fits within its capacity', () => {
+    const result = applyLedger(
+      [flow({ produces: { regolith: 400 } })],
+      {},
+      { storageCapacity: { regolith: 1_000 } },
+    )
+    expect(result.stockpiles.regolith).toBe(400)
+    expect(result.overflow).toEqual([])
+  })
+
+  it('should let a capped stock be drawn back down and refilled', () => {
+    // A cap is a ceiling, not a ratchet: a full silo must still be spendable.
+    const full = applyLedger(
+      [flow({ produces: { regolith: 10_000 } })],
+      {},
+      { storageCapacity: { regolith: 1_000 } },
+    )
+    expect(full.stockpiles.regolith).toBe(1_000)
+
+    const spent = applyLedger(
+      [flow({ consumes: { regolith: 600 } })],
+      full.stockpiles,
+      { storageCapacity: { regolith: 1_000 } },
+    )
+    expect(spent.stockpiles.regolith).toBe(400)
+    expect(spent.overflow).toEqual([])
+  })
+
+  it('should sort overflow entries by resource name', () => {
+    const result = applyLedger(
+      [flow({ produces: { zinc: 10, argon: 10 } })],
+      {},
+      { storageCapacity: { zinc: 1, argon: 1 } },
+    )
+    expect(result.overflow.map((entry) => entry.resource)).toEqual(['argon', 'zinc'])
+  })
+
+  it('should keep overflow amounts whole base units', () => {
+    // `Math.min` of two integers is an integer, so the cap introduces no division.
+    const result = applyLedger(
+      [flow({ produces: { regolith: 7 } })],
+      {},
+      { storageCapacity: { regolith: 3 } },
+    )
+    expect(Number.isInteger(result.overflow[0]!.amount)).toBe(true)
   })
 
   it('should not let a flow resource accumulate across many turns without capacity', () => {

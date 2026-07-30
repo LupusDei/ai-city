@@ -22,6 +22,9 @@ import type { Grid } from '../../src/sim/grid'
 import { validatePlacement } from '../../src/sim/placement'
 import type { ValidPlacement } from '../../src/sim/placement'
 import type { TurnCycleConfig } from '../../src/sim/time'
+// The single completion predicate (aic-zw6): `isProjectComplete` delegates to this, and
+// the suite at the end of this file pins the equivalence.
+import { isStructureComplete } from '../../src/sim/mission'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -618,5 +621,82 @@ describe('no storing labour (aic-chg) — whole build-turns only', () => {
     expect(result.labourHoursApplied).toBe(perTurn * 5)
     expect(result.labourHoursUnused).toBe(perTurn * 3)
     expect(isProjectComplete(TEST_CYCLE, result.queue[0]!)).toBe(true)
+  })
+})
+
+/**
+ * ONE completion predicate (aic-zw6).
+ *
+ * Three modules used to define their own — this one, `mission.ts`'s, and `power.ts`'s
+ * since-removed `isStructureOperational`. They agreed only by coincidence of three
+ * people making the same `>=` call, and the duplication had a specific expiry: spec 002
+ * FR-011 makes readiness a two-factor test, and two definitions of "built" is where the
+ * second factor gets added to one and not the other.
+ *
+ * `isProjectComplete` now delegates to `mission.ts`'s `isStructureComplete`. These tests
+ * pin the equivalence across every boundary case, so the consolidation is proven rather
+ * than asserted in a comment.
+ */
+describe('isProjectComplete — single source of truth', () => {
+  const perTurn = requiredLabourHoursPerBuildTurn(TEST_CYCLE)
+
+  function padProject(): ConstructionProject {
+    return projectAt('p1', PAD, freshGrid(), 0, 0).project
+  }
+
+  /** The comparison `isProjectComplete` used to make directly, kept here as the oracle. */
+  function byDirectComparison(project: ConstructionProject): boolean {
+    return (
+      project.accumulatedLabourHours >= totalLabourHoursRequired(project.structureType, TEST_CYCLE)
+    )
+  }
+
+  it('should agree with the direct labour comparison at every boundary', () => {
+    // PAD needs 5 build-turns. Sweep from well short to well past, including the exact
+    // boundary and one hour either side of it, plus a fractional value — the case that
+    // would have exposed a floor/epsilon disagreement between the two derivations.
+    const required = totalLabourHoursRequired(PAD, TEST_CYCLE)
+    const samples = [
+      0,
+      1,
+      required - perTurn,
+      required - 1,
+      required - 0.5,
+      required,
+      required + 0.5,
+      required + 1,
+      required + perTurn * 3,
+    ]
+
+    for (const accumulatedLabourHours of samples) {
+      const project = { ...padProject(), accumulatedLabourHours }
+      expect(isProjectComplete(TEST_CYCLE, project)).toBe(byDirectComparison(project))
+    }
+  })
+
+  it('should agree with mission.ts on the very structure it hands mission.ts', () => {
+    // The seam that matters: whatever `isProjectComplete` says, `mission.ts` must reach
+    // the same verdict about the `HabitatStructure` this module adapts for it. If these
+    // two ever disagree, a habitat could be "complete" for construction and incomplete
+    // for the win condition, or vice versa — silently losing or winning a mission.
+    for (const buildTurnsDone of [0, 1, 4, 5, 6]) {
+      const project = { ...padProject(), accumulatedLabourHours: perTurn * buildTurnsDone }
+      expect(isProjectComplete(TEST_CYCLE, project)).toBe(
+        isStructureComplete(toHabitatStructure(TEST_CYCLE, project)),
+      )
+    }
+  })
+
+  it('should treat a zero-build-turn structure as complete on arrival', () => {
+    // Pre-placed structures (a landed starship) have `buildTurns: 0`. Both derivations
+    // must agree that zero labour satisfies zero requirement — the degenerate case where
+    // a floor-based and a comparison-based rule could most easily diverge.
+    const prePlaced = createCatalog([
+      { ...PAD_SPEC, id: 'pre-placed', buildTurns: 0 },
+    ]).types.get('pre-placed')!
+    const project = { ...padProject(), structureType: prePlaced, accumulatedLabourHours: 0 }
+
+    expect(isProjectComplete(TEST_CYCLE, project)).toBe(true)
+    expect(isStructureComplete(toHabitatStructure(TEST_CYCLE, project))).toBe(true)
   })
 })

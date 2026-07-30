@@ -55,6 +55,10 @@ import type { ResourceFlow } from './ledger'
 import type { PlacementRejection, ValidPlacement } from './placement'
 import { applyPlacement, validatePlacement } from './placement'
 import type { HabitatStructure } from './mission'
+// The single completion predicate (aic-zw6). `mission.ts` owns what counts as complete;
+// this module owns how progress accrues. `mission.ts` imports nothing from here, so
+// there is no cycle.
+import { isStructureComplete } from './mission'
 import { labourCapacityHours } from './time'
 import type { TurnCycleConfig } from './time'
 
@@ -295,15 +299,34 @@ export function enqueueProject(
  * Whether `project` has accumulated at least `totalLabourHoursRequired`
  * labour-hours.
  *
- * `>=` rather than `===`, mirroring `mission.ts`'s `isStructureComplete`
- * exactly: a project that has (through some future allocation change)
- * accumulated more than strictly required must still read as complete, not
- * fall through as neither complete nor sensibly incomplete.
+ * DELEGATES to `mission.ts`'s `isStructureComplete` rather than re-deriving the
+ * comparison (aic-zw6). Three modules previously each defined their own
+ * completion predicate — this one, `mission.ts`'s, and `power.ts`'s since-removed
+ * `isStructureOperational` — all with the same `>=` rule and each documenting
+ * that choice separately. They agreed, but only by coincidence of three people
+ * making the same call, and the duplication had a specific expiry date: spec 002
+ * FR-011 makes habitat readiness a TWO-factor test (built AND rated), and two
+ * definitions of "built" would have been where the second factor got added to
+ * one and not the other.
+ *
+ * The division of responsibility this establishes: `mission.ts` owns WHAT COUNTS
+ * as complete, because it is the goal function; this module owns HOW PROGRESS
+ * ACCRUES. Note that readiness is a distinct, composed concept — a structure can
+ * legitimately be complete but unrated — so FR-011's second factor belongs
+ * alongside `totalHabitatCapacity`, not inside the completion rule itself.
+ *
+ * Provably equivalent to the previous direct comparison, for every non-negative
+ * `accumulatedLabourHours`: `turnsCompletedFor` yields
+ * `min(buildTurns, floor(acc / hoursPerTurn))`, and since `buildTurns` is an
+ * integer, `floor(acc / hoursPerTurn) >= buildTurns` exactly when
+ * `acc >= buildTurns * hoursPerTurn` — which is `totalLabourHoursRequired`. The
+ * `buildTurns: 0` case (pre-placed, complete on arrival) also agrees: both read
+ * as complete. `tests/unit/construction.test.ts` asserts the agreement directly.
  *
  * @throws {RangeError} if `config` fails `time.ts`'s own validation.
  */
 export function isProjectComplete(config: TurnCycleConfig, project: ConstructionProject): boolean {
-  return project.accumulatedLabourHours >= totalLabourHoursRequired(project.structureType, config)
+  return isStructureComplete(toHabitatStructure(config, project))
 }
 
 /**
@@ -448,14 +471,19 @@ export function advanceConstruction(
   //
   // It also removes a latent bug at the ROOT rather than patching it.
   // `turnsCompletedFor` divides `accumulatedLabourHours` by this same
-  // `hoursPerTurn` and floors it with NO epsilon, while `drones.ts` carries
-  // FLOOR_EPSILON for precisely that hazard. As soon as fractional labour entered
-  // the system (spec 003's panel cleaning is the first source), a 1e-13 deficit
-  // would have floored to one turn less, flipping a finished habitat to incomplete
-  // — contributing zero readiness and losing the mission on a rounding error.
-  // Because every grant here is an exact multiple, `accumulatedLabourHours` is
-  // always an exact multiple, so that quotient is exact and needs no epsilon. The
-  // class of error stops existing instead of being compensated for.
+  // `hoursPerTurn` and floors it with NO epsilon. As soon as fractional labour
+  // entered the system (spec 003's panel cleaning is the first source), a 1e-13
+  // deficit would have floored to one turn less, flipping a finished habitat to
+  // incomplete — contributing zero readiness and losing the mission on a rounding
+  // error. Because every grant here is an exact multiple, `accumulatedLabourHours`
+  // is always an exact multiple, so that quotient is exact and needs no epsilon.
+  // The class of error stops existing instead of being compensated for.
+  //
+  // `drones.ts` used to carry a `FLOOR_EPSILON` for exactly this hazard, and this
+  // comment used to cite it in the present tense. It is gone (aic-96o): the power
+  // path no longer divides at all, so the epsilon was deleted rather than ported.
+  // Corrected rather than dropped, because a comment describing code that no longer
+  // exists is the defect class that hid aic-c1p for a day.
   const hoursPerTurn = requiredLabourHoursPerBuildTurn(config)
 
   for (const project of queue) {

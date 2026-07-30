@@ -63,6 +63,45 @@
  * drones and the ceiling really would be ~43. A ruling about storage silently set the
  * game's core balance figure.
  *
+ * ---------------------------------------------------------------------
+ * PRECONDITION — THIS MODEL IS ONLY VALID WHILE NO STORAGE EXISTS
+ * ---------------------------------------------------------------------
+ * The whole-turn reservation assumes work-phase generation has nowhere to go. That is
+ * true today and ONLY today, because nothing in the colony grants electricity storage
+ * capacity. Do not inherit this model without inheriting its precondition.
+ *
+ * The moment any structure grants capacity via `storageCapacity.electricity`, the
+ * assumption breaks: work-phase surplus becomes bankable, a charging drone no longer
+ * ties up capacity it is not drawing, and this reservation OVER-CHARGES the drone —
+ * under-reporting the fleet the colony can actually run.
+ *
+ * How much is at stake, because it is not a rounding detail: under no-storage a
+ * three-reactor colony running its full 21-drone fleet throws away 3,089,328 Wh of a
+ * 5,959,167 Wh turn. That splits into two parts, and only the first is what storage
+ * would recover:
+ *   - PHASE WASTE, 2,909,445 Wh — capacity reserved but never drawn, because a drone
+ *     charges for only the recharge half of the turn. As a fraction of reserved
+ *     capacity this is 50.34%, which is EXACTLY the duty cycle (90,000 s of work in a
+ *     178,775 s turn) and necessarily so: drones work half the cycle and charge the
+ *     other half, so half the reactor output has nothing to do.
+ *   - UNALLOCATED, 179,883 Wh — the 0.65 of a drone that 21 whole drones leave over.
+ *     Not recoverable by storage; that needs a 22nd drone.
+ * Recovering the phase waste would raise the drone ceiling from 21 toward 43.
+ *
+ * So a battery is not a smoothing device. There is nothing to smooth: a turn spans
+ * 2.014 sols, so solar already averages out within one turn and no diurnal buffering
+ * is needed. A battery is the only route to cross-turn energy, and therefore the
+ * single highest-leverage structure available — it could roughly double the fleet.
+ * That is a consequence of the no-storage ruling, not of any balance choice.
+ *
+ * Storage is deliberately OUT OF SCOPE here and no battery exists. When one is added,
+ * `resolveElectricity` must take the granted capacity as an input and reserve
+ * `DRONE_GRID_ENERGY_WH` rather than `DRONE_TURN_CAPACITY_WH` for the portion of the
+ * fleet that bankable surplus can cover. `electricityLedgerPolicy` already accepts a
+ * capacity figure, so the ledger half is ready; this allocator is the half that is not.
+ * `tests/unit/power.test.ts` asserts the precondition explicitly, so the model cannot
+ * be silently carried past the point where it stops being true.
+ *
  * CONSEQUENCE for `produces`/`consumes`: for a structure that draws continuously, its
  * turn-capacity reservation and its per-turn energy are THE SAME NUMBER, so
  * `consumes.electricity` serves both with no conversion anywhere. The drone is the
@@ -82,7 +121,7 @@
  */
 
 import type { ResourceAmounts } from './catalog'
-import type { LedgerPolicy } from './ledger'
+import type { LedgerPolicy, Stockpile } from './ledger'
 import { PRIORITY_DRONE_RECHARGE, resolveBrownout } from './brownout'
 import type { PowerDemand } from './brownout'
 import { DRONE_GRID_ENERGY_WH } from './drones'
@@ -217,29 +256,47 @@ export function electricityDrawWh(source: ElectricityDrawSource, standby: boolea
 }
 
 /**
- * The `ledger.ts` policy that makes electricity a FLOW rather than a stock.
+ * The colony's `ledger.ts` accumulation policy: electricity is a FLOW, everything else
+ * is a stock, capped by whatever storage the colony grants.
  *
  * RULED BY THE GENERAL: "No storing energy without barriers." Generation is spent or
- * lost within the turn that produced it, unless a storage structure grants
- * containment. This is the ONE place in the codebase that states electricity is a
- * flow, which is what lets `ledger.ts` remain resource-agnostic — it applies a
- * declared policy and never branches on a resource name.
+ * lost within the turn that produced it, unless a storage structure grants containment.
+ * This is the ONE place in the codebase that states electricity is a flow, which is what
+ * lets `ledger.ts` remain resource-agnostic — it applies a declared policy and never
+ * branches on a resource name.
  *
- * `storageCapacityWh` is the total containment granted by the colony's completed
- * battery structures, summed from their `storageCapacity.electricity`. Zero — the
- * battery-less default — means the stockpile returns to zero every turn, however many
- * turns run, and the whole surplus is reported as `Vented`.
+ * `storageCapacity` is the colony's aggregate capacity per resource, summed by turn
+ * resolution across every OPERATING structure's `storageCapacity` (aic-7f5). It is
+ * accepted as a whole map rather than an electricity-only figure so that the flow
+ * declaration and the capacity table stay in one policy — building them separately would
+ * put `flowResources: [ELECTRICITY]` in a second place, which is precisely the split this
+ * function exists to prevent.
  *
- * Batteries do NOT smooth day/night: a turn spans 2.014 sols, so solar already
- * averages out within one turn and there is no diurnal smoothing to do. They are the
- * only route to cross-turn energy at all, which is precisely what makes them a
- * strategic structure rather than a redundant one.
+ * An absent `electricity` entry means zero containment: the stockpile returns to zero
+ * every turn, however many turns run, and the whole surplus is reported as `Vented`.
  *
- * @throws {RangeError} if `storageCapacityWh` is not a non-negative integer.
+ * Batteries do NOT smooth day/night: a turn spans 2.014 sols, so solar already averages
+ * out within one turn and there is no diurnal smoothing to do. They are the only route to
+ * cross-turn energy at all, which is precisely what makes them a strategic structure
+ * rather than a redundant one — see the precondition block in this module's header for
+ * just how much leverage that is.
+ *
+ * @throws {RangeError} if any capacity is not a non-negative integer. Validated here
+ *   rather than trusted because this map is AGGREGATED by a caller (summed across
+ *   structures) rather than read straight from the validated catalog, so it has not
+ *   passed `createCatalog`'s guard as a unit.
  */
-export function electricityLedgerPolicy(storageCapacityWh: number): LedgerPolicy {
-  assertNonNegativeInteger(storageCapacityWh, 'storageCapacityWh')
-  return { flowResources: [ELECTRICITY], storageCapacity: { [ELECTRICITY]: storageCapacityWh } }
+export function electricityLedgerPolicy(storageCapacity: Stockpile = {}): LedgerPolicy {
+  for (const [resource, amount] of Object.entries(storageCapacity)) {
+    assertNonNegativeInteger(amount, `storageCapacity.${resource}`)
+  }
+  return {
+    flowResources: [ELECTRICITY],
+    // Electricity defaults to ZERO containment rather than being absent: for a flow,
+    // absent and 0 mean the same thing in `ledger.ts`, but stating it explicitly makes
+    // the battery-less case visible in the policy a reader inspects.
+    storageCapacity: { [ELECTRICITY]: storageCapacity[ELECTRICITY] ?? 0, ...storageCapacity },
+  }
 }
 
 /**

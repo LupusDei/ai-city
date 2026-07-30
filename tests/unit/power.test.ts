@@ -134,6 +134,51 @@ describe('DRONE_TURN_CAPACITY_WH — the turn-capacity model', () => {
     // Rounded once at its point of definition, so no per-turn path ever divides.
     expect(Number.isInteger(DRONE_TURN_CAPACITY_WH)).toBe(true)
   })
+
+  it('should waste exactly the duty cycle while no storage exists', () => {
+    // THE PRECONDITION, asserted so the model cannot be carried silently past the
+    // point where it stops being true (see power.ts's precondition block).
+    //
+    // A three-reactor colony running its full 21-drone fleet throws away ~50.3% of all
+    // generation, and that figure IS the duty cycle — necessarily so, since drones work
+    // half the cycle and charge the other half, so half the reactor output has nothing
+    // to do. Recovering it with storage would raise the ceiling from 21 toward 43, which
+    // makes a battery the highest-leverage structure in the game rather than a
+    // smoothing device. When storage lands, THIS TEST MUST FAIL and the reservation
+    // model must be revisited — that is its job.
+    const generation = REACTOR_WH * 3
+    const result = resolveElectricity({
+      config: DEFAULT_TURN_CYCLE,
+      participants: [participant({ id: 'gen-1', producesWh: generation })],
+      droneRoster: roster(40),
+    })
+
+    expect(result.dronesOnShift).toHaveLength(21)
+
+    // The waste decomposes into two distinct parts, and separating them is the point —
+    // only the first is inherent to the no-storage model, and only the first is what a
+    // battery would recover.
+    const reserved = result.dronesOnShift.length * DRONE_TURN_CAPACITY_WH
+    const drawn = result.droneEnergyWh
+
+    // 1. PHASE WASTE — capacity reserved but not drawn, because a drone charges for
+    //    only the recharge half of the turn. This is exactly the duty cycle: 90,000 s
+    //    of work in a 178,775 s turn is 50.34%.
+    const phaseWasteFraction = (reserved - drawn) / reserved
+    expect(phaseWasteFraction).toBeGreaterThan(0.5030)
+    expect(phaseWasteFraction).toBeLessThan(0.5035)
+
+    // 2. UNALLOCATED capacity — the 0.65 of a drone that 21 whole drones leave over.
+    //    Real, reported, and NOT recoverable by storage; it needs a 22nd drone.
+    expect(result.unusedWh).toBe(generation - reserved)
+
+    // Together, ~3.1 MWh of a 5.96 MWh turn. Asserted as a range, not a round number:
+    // the honest figure is 3,089,328 Wh and pinning it to 3,000,000 would be false
+    // precision that a later constant change would break for the wrong reason.
+    const wasted = generation - drawn
+    expect(wasted / generation).toBeGreaterThan(0.5)
+    expect(wasted / generation).toBeLessThan(0.53)
+  })
 })
 
 describe('electricityWh', () => {
@@ -158,25 +203,25 @@ describe('electricityLedgerPolicy', () => {
     // RULED BY THE GENERAL: "No storing energy without barriers." This is the one
     // place in the codebase that states electricity is a flow, so `ledger.ts` can
     // stay resource-agnostic and never branch on a resource name.
-    expect(electricityLedgerPolicy(0).flowResources).toEqual([ELECTRICITY])
+    expect(electricityLedgerPolicy().flowResources).toEqual([ELECTRICITY])
   })
 
   it('should grant zero carry-over capacity for a battery-less colony', () => {
-    expect(electricityLedgerPolicy(0).storageCapacity).toEqual({ electricity: 0 })
+    expect(electricityLedgerPolicy().storageCapacity).toEqual({ electricity: 0 })
   })
 
   it('should grant the containment a battery provides', () => {
     // Batteries are the "barrier". They do not smooth day/night — a turn spans 2.014
     // sols, so solar already averages out within it — they are the only route to
     // cross-turn energy at all, which is what makes them strategic.
-    expect(electricityLedgerPolicy(1_000_000).storageCapacity).toEqual({
+    expect(electricityLedgerPolicy({ [ELECTRICITY]: 1_000_000 }).storageCapacity).toEqual({
       electricity: 1_000_000,
     })
   })
 
   it('should reject a non-integer or negative capacity', () => {
-    expect(() => electricityLedgerPolicy(1.5)).toThrow(RangeError)
-    expect(() => electricityLedgerPolicy(-1)).toThrow(RangeError)
+    expect(() => electricityLedgerPolicy({ [ELECTRICITY]: 1.5 })).toThrow(RangeError)
+    expect(() => electricityLedgerPolicy({ [ELECTRICITY]: -1 })).toThrow(RangeError)
   })
 })
 

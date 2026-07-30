@@ -251,7 +251,7 @@ describe('electricity seam: no storing energy without barriers', () => {
     const ledger = applyLedger(
       ledgerFlows(grid.poweredStructureIds, instances, grid.droneEnergyWh),
       {},
-      electricityLedgerPolicy(0),
+      electricityLedgerPolicy(),
     )
 
     expect(ledger.stockpiles[ELECTRICITY]).toBe(0)
@@ -267,7 +267,7 @@ describe('electricity seam: no storing energy without barriers', () => {
     const ledger = applyLedger(
       ledgerFlows(grid.poweredStructureIds, instances, grid.droneEnergyWh),
       {},
-      electricityLedgerPolicy(0),
+      electricityLedgerPolicy(),
     )
 
     // The accounting identity across the seam: everything generated was either drawn
@@ -284,7 +284,7 @@ describe('electricity seam: no storing energy without barriers', () => {
     // failure mode is a stockpile that creeps up turn after turn until the player can
     // run the whole colony off banked energy.
     let stockpiles: Stockpile = {}
-    const policy = electricityLedgerPolicy(0)
+    const policy = electricityLedgerPolicy()
 
     for (let turn = 0; turn < 278; turn++) {
       const grid = resolveElectricity({
@@ -317,7 +317,7 @@ describe('electricity seam: no storing energy without barriers', () => {
     const ledger = applyLedger(
       ledgerFlows(grid.poweredStructureIds, instances, grid.droneEnergyWh),
       {},
-      electricityLedgerPolicy(capacity),
+      electricityLedgerPolicy({ [ELECTRICITY]: capacity }),
     )
 
     expect(ledger.stockpiles[ELECTRICITY]).toBe(capacity)
@@ -345,7 +345,7 @@ describe('electricity seam: binary idle', () => {
     const flows = instances
       .filter((i) => grid.poweredStructureIds.includes(i.id))
       .map((i) => type(i.typeId))
-    const ledger = applyLedger(flows, { regolith: 5_000_000 }, electricityLedgerPolicy(0))
+    const ledger = applyLedger(flows, { regolith: 5_000_000 }, electricityLedgerPolicy())
 
     expect(ledger.stockpiles.regolith).toBe(5_000_000) // untouched
     expect(ledger.stockpiles.sinteredPlate).toBeUndefined() // produced nothing
@@ -372,7 +372,7 @@ describe('electricity seam: binary idle', () => {
       const flows = instances
         .filter((i) => grid.poweredStructureIds.includes(i.id))
         .map((i) => type(i.typeId))
-      const ledger = applyLedger(flows, { regolith: 5_000_000 }, electricityLedgerPolicy(0))
+      const ledger = applyLedger(flows, { regolith: 5_000_000 }, electricityLedgerPolicy())
 
       // Full output or none. Nothing in between is representable.
       expect(ledger.stockpiles.sinteredPlate ?? 0).toBe(expectedRunning ? 1_200_000 : 0)
@@ -495,7 +495,7 @@ describe('electricity seam: determinism across the whole seam', () => {
       const flows = instances
         .filter((i) => grid.poweredStructureIds.includes(i.id))
         .map((i) => type(i.typeId))
-      return { grid, ledger: applyLedger(flows, { regolith: 10_000_000 }, electricityLedgerPolicy(0)) }
+      return { grid, ledger: applyLedger(flows, { regolith: 10_000_000 }, electricityLedgerPolicy()) }
     }
     expect(run()).toEqual(run())
   })

@@ -1,9 +1,15 @@
 # Turn Composition Audit
 
-**Bead:** `aic-8eq` (P0) / `aic-a00.6` · **Author:** karax · **Date:** 2026-07-30
-**Status:** Phase 1 complete. Read section A before scheduling any Phase 2 work.
+**Bead:** `aic-8eq` (P0) / `aic-a00.6` / `aic-a00.7` · **Author:** karax · **Date:** 2026-07-30
+**Status:** Phase 2 complete. The game runs turns. See section J for what closed and what did not.
 
 ---
+
+> **Phase 2 update.** Everything below was written before the turn loop existed and is
+> preserved as the original diagnosis. The verdict was right: the ledger/power
+> contradiction was real, was ruled on, and is closed. Sections **I** and **J** at the end
+> record what changed, one correction the audit itself got wrong (the turn-capacity
+> factor-of-two), and what is still open.
 
 ## Verdict, up front
 
@@ -517,13 +523,98 @@ shed the abundant stage.
 
 ---
 
-## H. Recommended Phase 2 sequence
+## H. Phase 2 sequence — all executed
 
-1. Merge `agent/stetmann` + `agent/raynor` into `main` (**A1**, **A2**). Verified clean.
-2. Get a ruling on **B1** (electricity ownership) and **F2** (units). Both block the chains.
-3. `ColonyState` + the derivation functions (**E9**) — the actual content of `aic-a00.6`.
-4. `resolveTurn` in the D1 order, with D0's freeze and D2's asymmetry documented in code.
-5. Integration test over multiple consecutive turns through `turn-harness.ts`; commit the
-   golden trace (`aic-a00.7`).
-6. Fix **C1** (integer labour) before any fractional labour source lands.
-7. File beads for **E1**–**E10**.
+1. ✅ Merge `agent/stetmann` + `agent/raynor` into `main` (**A1**, **A2**).
+2. ✅ Rulings obtained on **B1** (electricity ownership) and **F2** (watt-hours), and on
+   **F1** (habitat standby = ~20% of rated).
+3. ✅ `ColonyState` + derivation functions (**E9**) — `src/sim/turn.ts`.
+4. ✅ `resolveTurn` in the D1 order, with D0's freeze and D2's asymmetry in code and
+   asserted by test.
+5. ✅ Golden trace committed (`aic-a00.7`): `tests/integration/turn-golden.json`,
+   16 turns, regenerated only by `scripts/record-golden-trace.ts`.
+6. ✅ **C1** fixed (labour granted only in whole build-turns — `aic-chg`).
+7. ✅ Beads filed for **E1**–**E10**.
+
+---
+
+## I. The turn-capacity correction (found during Phase 2, not in Phase 1)
+
+Converting the power path from float kW to integer watt-hours introduced a **factor-of-two
+error** that Phase 1's audit did not anticipate, and it is recorded here because the
+reasoning generalises.
+
+Comparing each consumer's **energy per turn** against generation per turn gives
+`3 × 1,986,389 Wh ÷ 136,659 Wh = 43.6 drones`. The ratified figure is **21.7**.
+
+The cause is the two-phase turn: structures draw across all 178,775 s, but a drone draws
+only during the 88,775 s recharge sol — and the General's no-storage ruling means
+work-phase generation **cannot be banked** to charge it later. So a charging drone ties up
+its capacity for the whole turn and the work-phase half is lost. The correct comparison is
+a **turn-capacity reservation** of 275,204 Wh per drone, which reproduces both ratified
+figures exactly (21, and 17 with one habitat).
+
+Three things worth carrying forward:
+
+- **A ruling about storage silently set the game's core balance number.** Had energy been
+  bankable, the ceiling really would be ~43.
+- **The old float-kW allocator was accidentally right about this**, because it compared kW
+  to kW. The unit conversion created the hazard, not the code it replaced.
+- **The model has a precondition with a live expiry.** Under no-storage a three-reactor
+  colony wastes 3,089,328 Wh of a 5,959,167 Wh turn — of which 2,909,445 Wh is phase
+  waste, exactly 50.34% of reserved capacity, which *is* the duty cycle. The moment any
+  structure grants electricity capacity, surplus becomes bankable and this reservation
+  over-charges the drone. Recovering that waste would raise the ceiling from 21 toward 43,
+  which makes a battery the single highest-leverage structure in the game rather than the
+  redundant smoothing device spec 003 assumed. The precondition is documented in
+  `power.ts` and asserted by test, so the model cannot be carried silently past the point
+  where it stops being true.
+
+---
+
+## J. Final state of every finding
+
+| # | Finding | Status |
+|---|---|---|
+| A1 | Two closed modules absent from `main` | **closed** (`aic-bfg`) |
+| A2 | `placement.ts` diverged between branches | **closed** with A1 |
+| B1 | Ledger and power both own electricity | **closed** (`aic-96o`) |
+| B2 | Clamp-and-report vs binary idle | **closed** (`aic-96o`) — only powered structures' flows reach the ledger |
+| B3 | Brownout not a total order, non-monotone | **closed** (`aic-9ol`) |
+| B4 | Drone recharge below every structure | **closed** — reversed, drone recharge above all processors |
+| B5 | Roster-position vs ascending-id priority | **closed** — `computeDroneShift` retired |
+| B6 | Priority a property of the caller's array | **closed** — `(priorityClass, instanceId)` |
+| C1 | Float labour accumulator | **closed** (`aic-chg`) |
+| C2 | Brownout flag permanently true | **closed** — now means "something was shed" |
+| D0/D1/D2 | The order, the freeze, the asymmetry | **implemented and asserted** (`src/sim/turn.ts`) |
+| E1/E2 | Reactor output a code constant; no generator/consumer distinction | **closed** (`aic-5lq`) |
+| E3/E8 | `landing.ts` output is a dead end; no roster source | **OPEN** (`aic-hfb`) — the last unwired seam |
+| E4 | `ResourceFlow` has no identity | **OPEN** (`aic-svp`) |
+| E5 | Duplicated `mulberry32` | **OPEN** (`aic-ugy`) |
+| E6 | `mission.ts` has no "rated" factor | **OPEN** — chain 1 (spec 002 FR-011) |
+| E7 | `buildTurns` means drone-turns | **OPEN** (`aic-kh5`) |
+| E9 | No colony state type | **closed** — `ColonyState` |
+| E10 | `landing.ts` re-declares `FootprintOffset` | **OPEN** — papercut |
+| F1 | Habitat standby draw | **ruled** — ~20% of rated, implemented as catalog data |
+| F2 | Wh vs Ws | **ruled** — watt-hours |
+| — | Shielding-dependent standby | **OPEN** (`aic-24y`) — needs chain 1's shielded flag |
+| — | `scale.ts` has no production consumer | **OPEN** (`aic-ck0`) — new instance of the same pattern |
+| — | Two completion predicates remain | **OPEN** (`aic-zw6`) |
+
+### The original defect, re-measured
+
+Re-running the `aic-c1p`/`aic-8eq` detector over `src/sim`: **40 exported operations now
+have a production consumer, up from a state where every top-level sim operation had
+zero.** The five modules `aic-8eq` named — ledger, drone construction, power, mission
+clock, drone roster — are all composed by `resolveTurn`, and a 16-turn golden trace locks
+the composition.
+
+Of the 20 remaining zero-cross-module-consumer exports, most are intra-module helpers or
+deliberate entry points (`resolveTurn` and `createColony` have no caller inside `src/sim`
+because they *are* the top of the stack — the game/UI layer that will call them does not
+exist yet). Two are genuine and filed: `landing.ts`'s turn-0 seam (`aic-hfb`) and
+`scale.ts` (`aic-ck0`).
+
+**The honest remaining gap:** the colony can now run 278 turns deterministically, but
+nothing yet turns a landing-site choice into a starting colony, and there is no
+application layer. `aic-hfb` is the next real bridge.
