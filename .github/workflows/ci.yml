@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # All real work happens on agent/* branches (see agent/raynor,
+    # agent/stetmann, ...); a gate that only triggers on main never runs
+    # until merge, which is how CI went red on every push without anyone
+    # noticing (aic-j18 / aic-hfp). `agent/**` covers any nesting depth,
+    # not just the single-level names in use today.
+    branches: [main, 'agent/**']
   pull_request:
     branches: [main]
 
@@ -27,14 +32,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
-
-      - name: Test Coverage
-        run: npm run test:coverage
+      # Single definition of the gate: typecheck -> lint -> build ->
+      # test:coverage. This MUST stay `npm run verify`, not four hand-listed
+      # steps. The previous version of this workflow re-listed the steps,
+      # omitted typecheck entirely, and ran the suite twice (`npm test` then
+      # `npm run test:coverage`, the second of which is the only one that
+      # enforces the Constitution §1 coverage thresholds) — exactly the kind
+      # of drift a single shared command prevents (aic-hfp). Matrix/caching
+      # above are the only parts that legitimately can't live in package.json;
+      # the gate itself is one command so it cannot drift from what
+      # developers run locally.
+      - name: Verify (typecheck, lint, build, test with coverage)
+        run: npm run verify
