@@ -81,6 +81,10 @@
  */
 
 import type { DepositOptions } from '../../sim/buildability'
+import { createCatalog } from '../../sim/catalog'
+import type { StructureCatalog, StructureTypeSpec } from '../../sim/catalog'
+import { chainOneStructureSpecs } from '../../sim/catalog-data'
+import { coreStructureSpecs } from '../../sim/catalog-data-core'
 import {
   DRONE_HULL_ID,
   REACTOR_HULL_ID,
@@ -216,6 +220,27 @@ export interface RunningState {
    * `resolveTurn` call below.
    */
   readonly weatherTimeline: readonly StormEvent[]
+  /**
+   * Every structure a player can QUEUE, validated once at `begin-mission` — the build
+   * tray's whole data source (aic-oby.7). See {@link buildableStructureSpecs} for what
+   * is combined into it and why nothing here is hardcoded per structure id: a screen
+   * enumerates this catalog GENERICALLY (`catalog.listStructureTypes`), so a chain that
+   * adds a fourth structure needs no change anywhere under `src/app/`.
+   *
+   * Built from `mission.turnCycle`, exactly as `colony-start.ts`'s private hull catalog
+   * is — a structure's watt-hour figures are a function of how long a turn is, so a
+   * scenario running a non-default cycle must validate against ITS OWN cycle, not
+   * `DEFAULT_TURN_CYCLE`. Generated once, here, and carried unchanged for the rest of
+   * the mission: the world and the weather timeline are already "decide once, carry
+   * through" for the identical reason (see the module header), and a catalog rebuilt
+   * per render would be wasted, deterministic-but-pointless work.
+   *
+   * Deliberately NOT the two landed hulls (`colony-start.ts` keeps those in ITS OWN
+   * private catalog): a hull is not a buildable structure, and putting it in this
+   * catalog would offer "Drone Hold (landed)" in the build tray as though a player
+   * could queue a second one.
+   */
+  readonly catalog: StructureCatalog
   /**
    * What the most recently RESOLVED turn actually did, or `null` before the first one.
    *
@@ -413,6 +438,31 @@ export function placedHulls(selection: LandingSelection): readonly HullId[] {
 }
 
 // ---------------------------------------------------------------------------
+// The build tray's catalog (aic-oby.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every buildable structure spec, from every authored chain — the ONE place they are
+ * concatenated before validation.
+ *
+ * A screen never imports `catalog-data.ts` or `catalog-data-core.ts` directly (nor
+ * could it and stay inside `tests/unit/app-boundary.test.ts`'s reads — this composition
+ * is a decision about WHICH content ships, which belongs at the adapter alongside every
+ * other "assemble the sim's inputs" call this module already makes). Adding a fourth
+ * chain is a one-line addition here, never a change to `OpsScreen.tsx` or
+ * `build-view.ts`: both read the resulting `StructureCatalog` generically via
+ * `catalog.listStructureTypes`, never by a hardcoded id list.
+ */
+function buildableStructureSpecs(mission: MissionConfig): readonly StructureTypeSpec[] {
+  return [...coreStructureSpecs(mission.turnCycle), ...chainOneStructureSpecs(mission.turnCycle)]
+}
+
+/** Validate {@link buildableStructureSpecs} into the build tray's `StructureCatalog`. */
+function buildableCatalog(mission: MissionConfig): StructureCatalog {
+  return createCatalog(buildableStructureSpecs(mission))
+}
+
+// ---------------------------------------------------------------------------
 // Intent handlers
 // ---------------------------------------------------------------------------
 
@@ -496,6 +546,7 @@ function beginMission(state: SurveyingState): GameState {
     landing,
     colony,
     weatherTimeline,
+    catalog: buildableCatalog(state.mission),
     lastReport: null,
     outlook: resolveTurn(colony).report,
     orderOutcomes: [],
@@ -856,6 +907,11 @@ export function loadMission(raw: string): LoadMissionResult {
       // weather would simply never come again for the rest of that save — a silent,
       // permanent loss of the game's only environmental pressure.
       weatherTimeline: generateStormTimeline(seed, totalTurns(colony.mission.turnCycle)),
+      // REBUILT, not saved — the same reasoning as `weatherTimeline` just above: the
+      // build tray's catalog is a pure function of the mission's own turn cycle, so
+      // recomputing it here is guaranteed to reproduce exactly what the mission was
+      // already running under, with no second copy of derivable data to drift.
+      catalog: buildableCatalog(colony.mission),
       lastReport: null,
       outlook: concluded ? null : resolveTurn(colony).report,
       orderOutcomes: [],

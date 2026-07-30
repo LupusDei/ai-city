@@ -67,8 +67,23 @@
 
 import { useState, type CSSProperties, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
 
+import { TerrainCanvas } from '../../canvas/TerrainCanvas'
+import { DEFAULT_TILE_SIZE, worldPixelSize } from '../../canvas/render-world'
 import { formatDepositCount, formatGridDimensions } from '../../world-readouts'
 import type { RunningState } from '../../state/game-state'
+import type { Coord } from '../../../sim/grid'
+import type { PlayerOrder } from '../../../sim/orders'
+import {
+  anchorBox,
+  buildAnchorTestId,
+  buildMenu,
+  buildQueue,
+  cancelBuildOrder,
+  lastOrderOutcome,
+  orderOutcomeReadout,
+  queueBuildOrder,
+} from './build-view'
+import type { BuildMenuEntry } from './build-view'
 import { acceptsEndCycle, isEndCycleEnabled } from './end-cycle-guard'
 import type { EndCyclePress } from './end-cycle-guard'
 import { formatWattHours, groupDigits, lastCycleSummary, missionVerdictText, opsView } from './ops-view'
@@ -103,6 +118,24 @@ export interface OpsScreenProps {
    * to drive a sim state transition (FR-004).
    */
   readonly onEndCycle: (afterTurnsTaken: number) => void
+  /**
+   * The player queued a build or cancelled one — routed through the EXISTING
+   * `issue-orders` action (aic-oby.7), the same intent `game-state.ts` already wires to
+   * `orders.applyOrders`. This screen builds no game logic of its own: `build-view.ts`'s
+   * `queueBuildOrder`/`cancelBuildOrder` construct the typed `PlayerOrder`, and the sim
+   * decides whether it succeeds.
+   *
+   * ```tsx
+   * <OpsScreen
+   *   state={game}
+   *   onEndCycle={...}
+   *   onIssueOrders={(orders) => {
+   *     setGame((current) => dispatch(current, { kind: 'issue-orders', orders }))
+   *   }}
+   * />
+   * ```
+   */
+  readonly onIssueOrders: (orders: readonly PlayerOrder[]) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +231,65 @@ const S = {
     color: MUTED,
     cursor: 'not-allowed',
   },
+  buildTray: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(11rem, 1fr))',
+    gap: '0.6rem',
+  },
+  buildCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.3rem',
+    alignItems: 'flex-start',
+    background: '#241d19',
+    border: `1px solid ${PANEL_EDGE}`,
+    borderRadius: '5px',
+    padding: '0.6rem 0.7rem',
+    cursor: 'pointer',
+    color: INK,
+    textAlign: 'left',
+    font: 'inherit',
+  },
+  buildCardSelected: {
+    // The FULL `border` shorthand, matching `buildCard`'s own property — never just
+    // `borderColor`. React warns ("Removing a style property during rerender...") when
+    // a shorthand and its longhand are mixed across a style swap, because toggling
+    // between `{ border }` and `{ border, borderColor }` leaves the DOM unable to tell
+    // which one should win on the next render.
+    border: `1px solid ${RUST}`,
+    background: '#33231b',
+  },
+  buildCardName: { fontWeight: 700, fontSize: '0.9rem' },
+  buildCardMeta: { fontSize: '0.7rem', color: MUTED },
+  placementPlate: { position: 'relative', display: 'inline-block' },
+  placementOverlay: { position: 'absolute', inset: 0 },
+  anchorButton: {
+    position: 'absolute',
+    padding: 0,
+    margin: 0,
+    border: 'none',
+    background: 'transparent',
+    cursor: 'crosshair',
+  },
+  outcomeBanner: {
+    padding: '0.5rem 0.7rem',
+    borderRadius: '4px',
+    fontSize: '0.8rem',
+    display: 'flex',
+    gap: '0.5rem',
+    alignItems: 'baseline',
+  },
+  queueTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' },
+  queueCell: { padding: '0.3rem 0.5rem', borderBottom: `1px solid ${PANEL_EDGE}`, textAlign: 'left' },
+  cancelButton: {
+    background: 'transparent',
+    color: RUST,
+    border: `1px solid ${RUST}`,
+    borderRadius: '4px',
+    padding: '0.2rem 0.5rem',
+    fontSize: '0.72rem',
+    cursor: 'pointer',
+  },
 } satisfies Record<string, CSSProperties>
 
 /** One labelled readout. `testId` goes on the VALUE element and nothing else shares it. */
@@ -258,6 +350,208 @@ function Gauge({
 }
 
 /**
+ * THE VERBS. Selecting a structure, placing it, and cancelling a queued build — the
+ * whole of aic-oby.7's "the game has no verbs" fix, and the reason this panel is
+ * rendered ABOVE the readouts rather than below the grid ledger: the General opened
+ * Colony Operations on a phone and could not find a single action, and a build tray
+ * buried under five panels of numbers would still fail that test.
+ *
+ * ============================================================================
+ * NO GAME LOGIC HERE EITHER (constitution §4)
+ * ----------------------------------------------------------------------------
+ * Every entry in the tray is `build-view.ts`'s `buildMenu`, read off `state.catalog`
+ * generically — there is no `if (id === 'regolith-hopper')` anywhere below, and
+ * `game-state.ts`'s `buildableStructureSpecs` is the one place a new chain gets added.
+ * A click never validates anything: it constructs the sim's own typed `PlayerOrder`
+ * (`queueBuildOrder`/`cancelBuildOrder`) and hands it to `onIssueOrders`, which the
+ * composition root turns into the EXISTING `issue-orders` action — the same adapter
+ * intent `orders.applyOrders` was already wired to and nothing in any `.tsx` had ever
+ * dispatched. The sim decides whether a placement is legal; this panel only renders
+ * `state.orderOutcomes`' verbatim answer (`orderOutcomeReadout`), FR-006's requirement
+ * that an illegal action surface the sim's typed rejection rather than a generic
+ * "invalid" message.
+ *
+ * ============================================================================
+ * WHY CLICK-TO-PLACE ON THE CANVAS, REUSING THE SURVEY SCREEN'S IDIOM
+ * ----------------------------------------------------------------------------
+ * `SurveyScreen` already teaches the player "click a tile over the terrain canvas to
+ * act on it" for the two landed hulls. Placement reuses exactly that gesture rather
+ * than inventing a second one: `TerrainCanvas` renders `state.world` (the same canvas
+ * the survey screen draws), and an overlay of absolutely-positioned buttons — sized and
+ * positioned from tile coordinates and the tile size alone, per `build-view.ts`'s
+ * `anchorBox`, never from a measured element — sits over it. The one difference from
+ * the survey screen's lattice of candidate markers is deliberate: a hull anchor was
+ * pre-filtered to legal-by-bounds sites because `evaluateLanding` cannot validate a
+ * single anchor in isolation (see `candidate-sites.ts`), but `queueConstruction`
+ * validates every order independently, so there is no equivalent reason to withhold
+ * any tile here — an anchor that would hang a footprint off the map is simply offered,
+ * clicked, and refused by the sim with `out-of-bounds`, exactly the typed rejection
+ * FR-006 wants demonstrated.
+ */
+function BuildPanel({
+  state,
+  onIssueOrders,
+}: {
+  readonly state: RunningState
+  readonly onIssueOrders: (orders: readonly PlayerOrder[]) => void
+}): JSX.Element {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const menu = buildMenu(state.catalog)
+  const queue = buildQueue(state)
+  const outcome = lastOrderOutcome(state)
+  const outcomeReadout = outcome === null ? null : orderOutcomeReadout(outcome)
+  const selected: BuildMenuEntry | null =
+    selectedId === null ? null : (menu.find((entry) => entry.id === selectedId) ?? null)
+
+  const { width: gridWidth, height: gridHeight } = state.world.grid
+  const { width: plateWidth, height: plateHeight } = worldPixelSize(state.world, DEFAULT_TILE_SIZE)
+
+  const toggleSelected = (id: string): void => {
+    setSelectedId((current) => (current === id ? null : id))
+  }
+
+  const placeAt = (anchor: Coord): void => {
+    if (selected === null) return
+    onIssueOrders([queueBuildOrder(selected.structureType, anchor)])
+  }
+
+  const cancelQueued = (id: string): void => {
+    onIssueOrders([cancelBuildOrder(id)])
+  }
+
+  return (
+    <section style={S.panel} aria-label="Build">
+      <h2 style={S.panelTitle}>Build</h2>
+
+      <div style={S.buildTray} data-testid="build-tray">
+        {menu.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            data-testid={`build-menu-${entry.id}`}
+            aria-pressed={entry.id === selectedId}
+            style={entry.id === selectedId ? { ...S.buildCard, ...S.buildCardSelected } : S.buildCard}
+            onClick={() => {
+              toggleSelected(entry.id)
+            }}
+          >
+            <span style={S.buildCardName}>{entry.name}</span>
+            <span style={S.buildCardMeta}>
+              {groupDigits(entry.footprintTiles)} tile{entry.footprintTiles === 1 ? '' : 's'} ·{' '}
+              {groupDigits(entry.buildTurns)} build turn{entry.buildTurns === 1 ? '' : 's'}
+            </span>
+            <span style={S.buildCardMeta}>{formatWattHours(entry.powerDrawWh)} / cycle</span>
+            <span style={S.buildCardMeta}>
+              {entry.buildCost.length === 0
+                ? 'No material cost'
+                : entry.buildCost
+                    .map((line) => `${groupDigits(line.amount)} g ${line.resource}`)
+                    .join(', ')}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {outcomeReadout === null ? null : (
+        <p
+          style={{
+            ...S.outcomeBanner,
+            color: outcomeReadout.ok ? OK : WARNING,
+          }}
+          data-testid="build-outcome"
+          role="status"
+        >
+          <span>{outcomeReadout.message}</span>
+          {outcomeReadout.code === null ? null : <code>{outcomeReadout.code}</code>}
+        </p>
+      )}
+
+      {selected === null ? null : (
+        <div>
+          <p style={S.tileHint}>
+            Placing {selected.name} — click a tile on the colony grid to build it there. Click{' '}
+            {selected.name} again above to cancel placement.
+          </p>
+          <div
+            style={{
+              ...S.placementPlate,
+              width: `${String(plateWidth)}px`,
+              height: `${String(plateHeight)}px`,
+            }}
+          >
+            <TerrainCanvas world={state.world} tileSize={DEFAULT_TILE_SIZE} />
+            <div style={S.placementOverlay} data-testid="placement-overlay">
+              {Array.from({ length: gridWidth * gridHeight }, (_unused, index) => {
+                const anchor: Coord = { x: index % gridWidth, y: Math.floor(index / gridWidth) }
+                const box = anchorBox(anchor, DEFAULT_TILE_SIZE)
+                return (
+                  <button
+                    key={buildAnchorTestId(anchor)}
+                    type="button"
+                    data-testid={buildAnchorTestId(anchor)}
+                    aria-label={`Place ${selected.name} at (${String(anchor.x)}, ${String(anchor.y)})`}
+                    style={{
+                      ...S.anchorButton,
+                      left: `${String(box.left)}px`,
+                      top: `${String(box.top)}px`,
+                      width: `${String(box.size)}px`,
+                      height: `${String(box.size)}px`,
+                    }}
+                    onClick={() => {
+                      placeAt(anchor)
+                    }}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <h3 style={S.panelTitle}>Build queue</h3>
+        {queue.length === 0 ? (
+          <p style={S.tileHint} data-testid="build-queue-empty">
+            Nothing under construction.
+          </p>
+        ) : (
+          <table style={S.queueTable} data-testid="build-queue">
+            <tbody>
+              {queue.map((entry) => (
+                <tr key={entry.id} data-testid={`build-queue-row-${entry.id}`}>
+                  <td style={S.queueCell}>{entry.name}</td>
+                  <td style={S.queueCell} data-testid={`build-queue-status-${entry.id}`}>
+                    {entry.complete
+                      ? 'Complete'
+                      : `${String(entry.turnsCompleted)} / ${String(entry.buildTurns)} turns ` +
+                        `(${String(entry.turnsRemaining)} to go)`}
+                  </td>
+                  <td style={S.queueCell}>
+                    {entry.complete ? null : (
+                      <button
+                        type="button"
+                        style={S.cancelButton}
+                        data-testid={`cancel-build-${entry.id}`}
+                        onClick={() => {
+                          cancelQueued(entry.id)
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
  * The Colony Operations screen.
  *
  * Holds exactly one piece of state, and it is not game state: which turn the last accepted
@@ -265,7 +559,7 @@ function Gauge({
  * category as `placedHulls` in the adapter — and it is what lets the control disable itself
  * while a resolution is in flight without anything here learning what a turn is.
  */
-export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
+export function OpsScreen({ state, onEndCycle, onIssueOrders }: OpsScreenProps): JSX.Element {
   const [acceptedForTurnsTaken, setAcceptedForTurnsTaken] = useState<number | null>(null)
 
   const view = opsView(state)
@@ -322,6 +616,8 @@ export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
           </span>
         </div>
       </header>
+
+      <BuildPanel state={state} onIssueOrders={onIssueOrders} />
 
       <section style={S.panel} aria-label="Constraints">
         <h2 style={S.panelTitle}>Constraints — cycle {view.turn}</h2>

@@ -58,6 +58,7 @@
 import { type JSX, useCallback, useEffect, useState } from 'react'
 
 import type { Coord } from '../sim/grid'
+import type { PlayerOrder } from '../sim/orders'
 import { OpsScreen } from './screens/ops/OpsScreen'
 import { SurveyScreen } from './screens/SurveyScreen'
 import { resolveSeed } from './seed'
@@ -122,6 +123,12 @@ export function App({ search, random = Math.random }: AppProps): JSX.Element {
     },
     [act],
   )
+  const issueOrders = useCallback(
+    (orders: readonly PlayerOrder[]) => {
+      act({ kind: 'issue-orders', orders })
+    },
+    [act],
+  )
 
   // The app's only history call. `replaceState`, never `pushState`: pinning the seed is a
   // correction to the current URL, not navigation — a pushed entry would give the player a
@@ -146,7 +153,7 @@ export function App({ search, random = Math.random }: AppProps): JSX.Element {
           onBeginMission={startMission}
         />
       ) : (
-        <OpsScreen state={game} onEndCycle={endCycle} />
+        <OpsScreen state={game} onEndCycle={endCycle} onIssueOrders={issueOrders} />
       )}
     </>
   )

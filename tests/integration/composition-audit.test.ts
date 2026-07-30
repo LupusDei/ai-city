@@ -61,7 +61,6 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // counts cross-file callers only — so these are orphans by its definition, not by design.
   'landing.scoreLandingSite',
   'landing.validateLandingSite',
-  'catalog.listStructureTypes',
 
   // --- Chain 1's authored catalog data, awaiting the build menu (aic-d8y.1.2) ---
   // `catalog-data.ts` IS the player's build menu, and the sim/UI adapter that offers a
@@ -69,7 +68,6 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // caller" category, not a helper nobody wired. It is not pre-placed into the starting
   // colony on purpose: chain 1 is buildable, not landed. When the adapter lands, this
   // entry must be DELETED rather than left here.
-  'catalog-data.chainOneStructureSpecs',
 
   'colony-start.startMission',
 
@@ -92,7 +90,6 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // production caller is scripts/balance-report.ts, which is outside src/ and therefore
   // invisible to this scan; tests/integration/balance-pass.test.ts is the gate that
   // proves they genuinely run.
-  'catalog-data-core.coreStructureSpecs',
   'mission-runner.runMission',
   'balance-strategies.createBalanceStrategies',
   'scale.tileAreaForEdgeM2',
@@ -102,7 +99,6 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   'construction.occupiedTiles',
   'construction.requiredLabourHoursPerBuildTurn',
   'construction.totalLabourHoursRequired',
-  'construction.turnsCompletedFor',
   'ledger.computeBalances',
   'brownout.comparePowerDemands',
   'placement.resolveFootprint',
