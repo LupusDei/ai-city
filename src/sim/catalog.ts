@@ -466,12 +466,74 @@ function validateStandbyConsumes(
   }
 }
 
+/**
+ * Every field `StructureTypeSpec` declares. This is the allow-list `validateAndFreeze`
+ * checks a spec's own keys against, and it is maintained BY HAND — TypeScript erases
+ * interfaces at runtime, so there is no way to derive "every key of `StructureTypeSpec`"
+ * from the type itself. That hand-maintenance is a deliberate cost, not an oversight:
+ * see `validateAndFreeze`'s return statement, which builds the validated object field by
+ * field rather than by spreading. Adding a field to `StructureTypeSpec` without adding
+ * it here means every legitimately authored spec using that field now fails loudly at
+ * `createCatalog` with "unknown property" — annoying, but a five-second fix pointed at
+ * by a clear error, and the honest alternative to the field silently riding through
+ * unvalidated and aliased, which is the defect this whole guard exists to close
+ * (aic-xm5).
+ */
+const KNOWN_SPEC_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'name',
+  'footprint',
+  'buildTurns',
+  'produces',
+  'consumes',
+  'buildCost',
+  'siting',
+  'storageCapacity',
+  'standbyConsumes',
+  'priorityClass',
+  'habitatCapacity',
+])
+
+/**
+ * Reject any property the spec carries that this module does not know how to
+ * validate, default, or copy.
+ *
+ * This is the other half of the validation boundary, not a cosmetic tidy-up. Before
+ * this guard, `validateAndFreeze` built the validated entry via `{ ...specification,
+ * ... }`: any property the caller's object carried but this module had never heard of
+ * rode straight through the spread into the "validated" result, unchecked and — for
+ * anything object-shaped — ALIASED to the caller's own reference rather than copied.
+ * A catalog that claims "validated once, trusted forever" while silently admitting
+ * arbitrary unvalidated, mutable data is not validating anything.
+ *
+ * REJECT rather than silently drop, deliberately: catalog content is authored, not
+ * player input (see `createCatalog`'s own doc comment), so a typo'd field name
+ * (`buldCost` instead of `buildCost`) is a build-time authoring defect. Dropping it
+ * would make that structure's intended cost simply vanish with no error anywhere —
+ * "my structure does nothing" discovered by a designer three turns into a playtest,
+ * instead of a RangeError naming the exact field at load time. Loud-and-early is the
+ * same trade this module already makes for every other malformed-data case.
+ */
+function validateNoUnknownProperties(id: string, specification: StructureTypeSpec): void {
+  for (const key of Object.keys(specification)) {
+    if (!KNOWN_SPEC_KEYS.has(key)) {
+      throw new RangeError(
+        `Structure "${id}": unknown property "${key}" — StructureTypeSpec has no such ` +
+          'field. Check for a typo in the field name, or update KNOWN_SPEC_KEYS in ' +
+          'catalog.ts if this is a deliberately new field.',
+      )
+    }
+  }
+}
+
 function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   const { id } = specification
 
   if (id.length === 0) {
     throw new RangeError('Structure id must be a non-empty string')
   }
+
+  validateNoUnknownProperties(id, specification)
 
   // Resolve the optional authoring fields ONCE, before validation, so the value
   // that gets validated is exactly the value that gets stored. Validating
@@ -498,16 +560,25 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
   validateStandbyConsumes(id, standbyConsumes, specification.consumes)
   validateSiting(id, siting)
 
-  // Defensive copy of every mutable member: a catalog that aliases caller-owned
-  // arrays or objects can be corrupted after it has already been validated —
-  // including corrupted into a state that could never have passed validation, such
-  // as a negative buildCost. Every map below is copied, not just the pre-existing
-  // ones, and one authored object shared across two entries yields two independent
-  // copies. `siting` is flat today so a spread copies it fully; if it ever gains a
-  // nested member (a slope range, a latitude band) this copy must deepen with it.
+  // Built EXPLICITLY, field by field — never `{ ...specification, ... }`. A spread
+  // here would undo both `validateNoUnknownProperties` above (any property TypeScript
+  // didn't statically catch would still ride through at runtime) and every defensive
+  // copy below (any field not individually re-assigned after the spread would alias
+  // the caller's own reference instead of copying it). Listing every field also means
+  // adding one to `StructureTypeSpec` is a compile error HERE until a deliberate
+  // decision is made about whether and how to copy it — the type checker enforces
+  // that this object stays exhaustive, the same way `KNOWN_SPEC_KEYS` has to be
+  // extended by hand for the property to be accepted at all.
+  //
+  // Every mutable member is copied, not just the pre-existing ones, and one authored
+  // object shared across two entries yields two independent copies. `siting` is flat
+  // today so a spread copies it fully; if it ever gains a nested member (a slope
+  // range, a latitude band) this copy must deepen with it.
   return {
-    ...specification,
+    id: specification.id,
+    name: specification.name,
     footprint: specification.footprint.map(({ dx, dy }) => ({ dx, dy })),
+    buildTurns: specification.buildTurns,
     produces: { ...specification.produces },
     consumes: { ...specification.consumes },
     buildCost: { ...buildCost },
@@ -515,6 +586,7 @@ function validateAndFreeze(specification: StructureTypeSpec): StructureType {
     storageCapacity: { ...storageCapacity },
     standbyConsumes: { ...standbyConsumes },
     priorityClass,
+    habitatCapacity: specification.habitatCapacity,
   }
 }
 

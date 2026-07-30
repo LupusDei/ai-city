@@ -1032,3 +1032,105 @@ describe('createCatalog — standbyConsumes', () => {
     expect(habitat.standbyConsumes.electricity!).toBeLessThan(habitat.consumes.electricity!)
   })
 })
+
+/**
+ * aic-xm5: `validateAndFreeze` builds the validated entry with `{ ...specification, ... }`.
+ * That spread is the validation boundary's whole job — the rest of the sim treats a
+ * `StructureType` as trusted precisely because it came out of this function — and a
+ * spread cannot do that job:
+ *
+ *   1. Any property the caller's object carries that this module has never heard of
+ *      rides straight through the `...specification` into the "validated" result. The
+ *      boundary claims a guarantee ("this has been checked") it does not provide.
+ *   2. Any property NOT explicitly re-copied after the spread is ALIASED, not copied —
+ *      the returned object holds the caller's own reference. `footprint`, `produces`,
+ *      `consumes`, `buildCost`, `siting`, `storageCapacity` and `standbyConsumes` are
+ *      all defended today because each is re-assigned after the spread. Nothing
+ *      defends a field the catalog does not know to re-assign, which today means any
+ *      unknown property, and tomorrow means any FUTURE field an author adds to
+ *      `StructureTypeSpec` without also remembering to update this function.
+ *
+ * These two tests reproduce both halves against a spec cast through `as
+ * StructureTypeSpec` — TypeScript's excess-property check only fires on object
+ * literals assigned directly to a typed position, so a cast is the honest way to get
+ * an extra field PAST THE TYPE SYSTEM and onto the runtime boundary this module is
+ * supposed to be guarding. That is exactly the situation `validateAndFreeze` must
+ * handle: by the time a spec reaches it, it is untrusted runtime data, not a
+ * compile-time-checked literal (a spec loaded from JSON, for instance, is never
+ * checked by the excess-property rule at all).
+ */
+describe('createCatalog — unknown properties (aic-xm5)', () => {
+  it('should reject an unknown property, naming the structure and the property', () => {
+    // Simulates an author typo — e.g. meaning `buildCost` and writing `buldCost` — or
+    // any other property this module has never heard of. Rejected loudly: catalog
+    // content is authored, not player input, so a typo'd field name must fail at load
+    // time rather than silently doing nothing forever.
+    const specWithUnknownField = {
+      ...spec({ id: 'typo-victim' }),
+      unknownField: 'should never appear on a validated StructureType',
+    } as StructureTypeSpec
+
+    expect(() => createCatalog([specWithUnknownField])).toThrow(RangeError)
+    expect(() => createCatalog([specWithUnknownField])).toThrow(/typo-victim/)
+    expect(() => createCatalog([specWithUnknownField])).toThrow(/unknownField/)
+  })
+
+  it('should reject an unknown property even when its value is a caller-owned nested object', () => {
+    // Closes off the aliasing hazard at the root: if an unknown property can never
+    // reach a validated entry at all, there is nothing left for the caller to mutate
+    // afterwards — no catalog is ever produced from this spec.
+    const sharedMutableTag = { note: 'original' }
+    const specWithUnknownNested = {
+      ...spec({ id: 'aliased-victim' }),
+      unknownNested: sharedMutableTag,
+    } as StructureTypeSpec
+
+    expect(() => createCatalog([specWithUnknownNested])).toThrow(RangeError)
+    expect(() => createCatalog([specWithUnknownNested])).toThrow(/unknownNested/)
+  })
+
+  it('should not reject any of the known, documented StructureTypeSpec fields', () => {
+    // The other side of the guard: it must recognise every field this module actually
+    // defines, or authoring a legitimate structure becomes impossible. One spec
+    // exercising every field at once.
+    expect(() =>
+      createCatalog([
+        {
+          id: 'kitchen-sink',
+          name: 'Kitchen Sink',
+          footprint: [{ dx: 0, dy: 0 }],
+          buildTurns: 3,
+          produces: { oxygen: 1 },
+          consumes: { electricity: 10 },
+          buildCost: { silicon: 5 },
+          siting: { requiresDeposit: 'silica' },
+          storageCapacity: { oxygen: 100 },
+          standbyConsumes: { electricity: 2 },
+          priorityClass: 5,
+          habitatCapacity: 0,
+        },
+      ]),
+    ).not.toThrow()
+  })
+
+  it('NEGATIVE CONTROL: the unknown-property guard demonstrably fires, naming field and value', () => {
+    // A guard nobody has watched fail is a guard you cannot trust. Capture the error,
+    // assert its type, assert the message names the structure and the offending
+    // property, then prove the unknown property was the SOLE cause by re-running the
+    // identical spec with it removed and requiring success.
+    const withUnknown = { ...spec({ id: 'guard-check' }), rogueField: 42 } as StructureTypeSpec
+
+    let captured: unknown
+    try {
+      createCatalog([withUnknown])
+    } catch (error) {
+      captured = error
+    }
+
+    expect(captured).toBeInstanceOf(RangeError)
+    expect((captured as RangeError).message).toContain('guard-check')
+    expect((captured as RangeError).message).toContain('rogueField')
+
+    expect(() => createCatalog([spec({ id: 'guard-check' })])).not.toThrow()
+  })
+})
