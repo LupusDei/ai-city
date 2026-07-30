@@ -88,9 +88,17 @@ import {
 import type { ConstructionProject, ConstructionQueue } from './construction'
 import type { DroneId } from './drones'
 import { applyLedger } from './ledger'
-import type { Overflow, ResourceBalance, Shortfall, Stockpile, Vented } from './ledger'
+import type {
+  Overflow,
+  ResourceBalance,
+  Shortfall,
+  ShortfallAttribution,
+  Stockpile,
+  Vented,
+} from './ledger'
 import { evaluateMission, totalHabitatCapacity } from './mission'
 import type { MissionConfig, MissionOutcome } from './mission'
+import { PRIORITY_DEFAULT, rationaleForPriority } from './brownout'
 import {
   ELECTRICITY,
   electricityDrawWh,
@@ -103,6 +111,19 @@ import type { GenerationEnvironment, PowerSourceState } from './generation'
 
 /** Default grid size when a caller does not supply one: the 64x64 (320 m) ratified map. */
 const DEFAULT_GRID_DIMENSION = 64
+
+/**
+ * Synthetic `ResourceFlow.id` for the fleet's aggregate recharge draw (aic-svp) — see
+ * the `ledgerFlows` comment in `resolveTurn`. Not a structure instance id, so prefixed
+ * with `$`: no structure instance id in this sim is ever caller-issued with a `$`
+ * prefix (ids come from `queueConstruction`'s caller-chosen strings, always a plain
+ * building name in every scenario this project has), and reserving the prefix here
+ * documents the assumption in the one place a collision would matter — a real
+ * structure named `$drone-recharge` would be silently double-counted as the fleet in a
+ * shortfall's attribution. Cheaper than validating it at every call site, and precise
+ * about the one place it would actually go wrong.
+ */
+const DRONE_RECHARGE_FLOW_ID = '$drone-recharge'
 
 /**
  * The complete, canonical colony state — the single record every module's view is
@@ -175,6 +196,27 @@ export const TURN_STEPS = [
 export type TurnStepName = (typeof TURN_STEPS)[number]
 
 /**
+ * Why an operational structure produced nothing this turn (aic-svp, docs/
+ * turn-composition-audit.md E4 — "same for idle reasons").
+ *
+ * Scoped to POWER for now, because that is the only binary-idle rule this sim
+ * implements today: input starvation (a powered structure short of feedstock) is
+ * documented OUT OF SCOPE in this module's own header, and inventing an idle reason
+ * for it here would report a decision the turn loop does not actually make. So every
+ * entry names a structure `brownout.ts` denied power, one per id in
+ * `ElectricityResult.shedStructureIds` (same order — priority class, then id, never
+ * Map/Set order), each carrying the SAME rationale text a reader would find in
+ * `brownout.ts`'s own documented `BROWNOUT_PRIORITY_CLASSES` for that structure's
+ * priority class. When the resource-chain epics add real input-starvation idling, its
+ * reason belongs here too — this type does not need to change, only the population of
+ * `resolveTurn`'s `shedStructures` list.
+ */
+export interface ShedStructureReport {
+  readonly id: string
+  readonly reason: string
+}
+
+/**
  * Everything that happened in one turn, in a form a player-facing cycle report or a
  * golden trace can consume without re-deriving anything.
  *
@@ -200,6 +242,19 @@ export interface CycleReport {
   readonly balances: readonly ResourceBalance[]
   /** Resources that ran out. Should be empty for electricity — the brownout prevents it. */
   readonly shortfalls: readonly Shortfall[]
+  /**
+   * Per-structure attribution for each entry in `shortfalls`, at the same index
+   * (aic-svp) — see `ledger.ts`'s `ShortfallAttribution`. Names every operational,
+   * powered structure with a live claim on the resource that ran out, not just the
+   * total that ran out.
+   */
+  readonly shortfallAttribution: readonly ShortfallAttribution[]
+  /**
+   * Operational structures that produced nothing this turn, each with why (aic-svp) —
+   * see `ShedStructureReport`. Always the same ids as `electricity.shedStructureIds`,
+   * in the same order, each paired with its priority class's rationale.
+   */
+  readonly shedStructures: readonly ShedStructureReport[]
   /** Flow resources produced but not containable, and therefore gone (e.g. vented energy). */
   readonly vented: readonly Vented[]
   /**
@@ -408,14 +463,27 @@ export function resolveTurn(state: ColonyState): TurnResolution {
     // to the raw structure type would put a SECOND notion of "what does this project
     // contribute to the ledger" in the codebase, which is how the two drift. Defence in
     // depth on the rule that matters most: an unfinished structure produces nothing.
-    .map((project) => toResourceFlow(config, project))
+    //
+    // `id: project.id` is the ONE line that closes aic-svp: `ResourceFlow.id` is
+    // optional metadata `toResourceFlow` itself has no reason to set (it adapts a
+    // project into a resource shape, not an identity), so it is attached HERE, where
+    // the instance id is already in scope. This is what lets `ledger.ts` name which
+    // structure had a live claim on a resource that ran short, instead of only the total.
+    .map((project) => ({ ...toResourceFlow(config, project), id: project.id }))
 
   // Drone recharge is a real electricity draw with no structure behind it, so it enters
   // the ledger as its own flow. This is the ACTUAL energy taken, not the turn capacity
-  // reserved — see `power.ts`'s turn-capacity block for why the two differ.
+  // reserved — see `power.ts`'s turn-capacity block for why the two differ. Given a
+  // stable synthetic id (aic-svp) rather than left anonymous: the fleet really is a
+  // claimant on electricity, and naming it means an electricity shortfall's attribution
+  // (were one ever to occur — see `ledger.ts`'s `ShortfallAttribution`) can say "the
+  // drone fleet" instead of silently omitting the single largest consumer in the game.
   const ledgerFlows =
     electricity.droneEnergyWh > 0
-      ? [...flows, { produces: {}, consumes: { [ELECTRICITY]: electricity.droneEnergyWh } }]
+      ? [
+          ...flows,
+          { id: DRONE_RECHARGE_FLOW_ID, produces: {}, consumes: { [ELECTRICITY]: electricity.droneEnergyWh } },
+        ]
       : flows
 
   // STORAGE CAPACITY (aic-7f5). Aggregated across every OPERATING structure, for every
@@ -460,6 +528,32 @@ export function resolveTurn(state: ColonyState): TurnResolution {
   const habitats = advanced.queue.map((project) => toHabitatStructure(config, project))
   const mission = evaluateMission(state.mission, turnsTaken, habitats)
 
+  // ---------------------------------------------------------------------
+  // Per-structure idle attribution (aic-svp) — WHY a structure produced nothing
+  // ---------------------------------------------------------------------
+  // Built entirely from data earlier steps already computed: `participants` (step 2)
+  // carries every operating structure's priority class, and
+  // `electricity.shedStructureIds` is already the priority-ordered set `brownout.ts`
+  // denied power — never Map/Set order (see `brownout.ts`'s own determinism note), so
+  // `shedStructures` inherits that same order rather than defining a new one.
+  //
+  // `priorityById` is a `Map` used for LOOKUP ONLY, never enumerated — the same
+  // membership/lookup-only idiom this module already uses for `offline` and
+  // `operatingIds` above, so no Map iteration order can reach `shedStructures`.
+  const priorityById = new Map(participants.map((participant) => [participant.id, participant.priority]))
+  const shedStructures: ShedStructureReport[] = electricity.shedStructureIds.map((id) => ({
+    id,
+    // `?? PRIORITY_DEFAULT` is defensive, not reachable in practice: every id in
+    // `shedStructureIds` was necessarily an `operating: true` participant (`power.ts`
+    // excludes non-operating structures from both generation and demand), and
+    // `participants` is built from `state.queue` unconditionally — so every shed id
+    // already has an entry here. `noUncheckedIndexedAccess` still requires the
+    // fallback for `Map.get`'s type, and the fallback is itself a real, if unreachable,
+    // rationale rather than a throw — see `rationaleForPriority`'s own "always returns
+    // a string" contract.
+    reason: rationaleForPriority(priorityById.get(id) ?? PRIORITY_DEFAULT),
+  }))
+
   return {
     state: {
       mission: state.mission,
@@ -487,6 +581,8 @@ export function resolveTurn(state: ColonyState): TurnResolution {
       completedThisTurn,
       balances: ledger.balances,
       shortfalls: ledger.shortfalls,
+      shortfallAttribution: ledger.shortfallAttribution,
+      shedStructures,
       vented: ledger.vented,
       overflow: ledger.overflow,
       habitatCapacity: totalHabitatCapacity(habitats),

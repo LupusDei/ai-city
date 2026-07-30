@@ -31,6 +31,7 @@ import {
   PRIORITY_PROCESSOR_DOWNSTREAM,
   PRIORITY_PROCESSOR_UPSTREAM,
   comparePowerDemands,
+  rationaleForPriority,
   resolveBrownout,
 } from '../../src/sim/brownout'
 import type { PowerDemand } from '../../src/sim/brownout'
@@ -78,6 +79,33 @@ describe('BROWNOUT_PRIORITY_CLASSES', () => {
       expect(entry.name.length).toBeGreaterThan(0)
       expect(entry.rationale.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('rationaleForPriority (aic-svp)', () => {
+  // A shed structure's idle REASON, in `turn.ts`'s `CycleReport`, is this function's
+  // whole reason to exist: naming WHY a priority class sits where it does, for
+  // whichever priority value a shed structure actually carried.
+
+  it('should return the exact rationale for every documented priority class', () => {
+    for (const entry of BROWNOUT_PRIORITY_CLASSES) {
+      expect(rationaleForPriority(entry.priority)).toBe(entry.rationale)
+    }
+  })
+
+  it('should fall back to the unclassified rationale for a priority between two documented classes', () => {
+    // 350 sits between PRIORITY_DRONE_RECHARGE (300) and PRIORITY_PROCESSOR_DOWNSTREAM
+    // (400) — a value the "spaced by 100" design explicitly leaves room for, and one
+    // no documented class owns.
+    const unclassified = BROWNOUT_PRIORITY_CLASSES.find((entry) => entry.name === 'unclassified')
+    expect(unclassified).toBeDefined()
+    expect(rationaleForPriority(350)).toBe(unclassified!.rationale)
+  })
+
+  it('should fall back to the unclassified rationale for a priority outside the documented range', () => {
+    const unclassified = BROWNOUT_PRIORITY_CLASSES.find((entry) => entry.name === 'unclassified')!
+    expect(rationaleForPriority(-1)).toBe(unclassified.rationale)
+    expect(rationaleForPriority(1_000_000)).toBe(unclassified.rationale)
   })
 })
 

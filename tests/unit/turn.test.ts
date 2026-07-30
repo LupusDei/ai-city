@@ -17,7 +17,11 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { PRIORITY_HABITAT, PRIORITY_PROCESSOR_UPSTREAM } from '../../src/sim/brownout'
+import {
+  PRIORITY_HABITAT,
+  PRIORITY_PROCESSOR_UPSTREAM,
+  rationaleForPriority,
+} from '../../src/sim/brownout'
 import { createCatalog, getStructureType } from '../../src/sim/catalog'
 import type { StructureType } from '../../src/sim/catalog'
 import { createProject, requiredLabourHoursPerBuildTurn } from '../../src/sim/construction'
@@ -61,6 +65,29 @@ const CATALOG = createCatalog([
     produces: { regolith: 60_000_000 },
     consumes: { [ELECTRICITY]: energyPerTurnWh(12_000, CONFIG) },
     priorityClass: PRIORITY_PROCESSOR_UPSTREAM,
+    habitatCapacity: 0,
+  },
+  // The two below exist only for the ledger-attribution seam test (aic-svp): two
+  // DIFFERENT structure types (so their per-instance regolith draw genuinely differs,
+  // which a single type with two instances could not show — see that test's comment)
+  // consuming a resource nothing in this file's catalog PRODUCES, so a colony built
+  // from them alone runs a real, colony-driven shortfall rather than a hand-built one.
+  {
+    id: 'crusher-small',
+    name: 'Ore Crusher (small)',
+    footprint: [{ dx: 0, dy: 0 }],
+    buildTurns: 2,
+    produces: {},
+    consumes: { [ELECTRICITY]: energyPerTurnWh(5_000, CONFIG), regolith: 300 },
+    habitatCapacity: 0,
+  },
+  {
+    id: 'crusher-large',
+    name: 'Ore Crusher (large)',
+    footprint: [{ dx: 0, dy: 0 }],
+    buildTurns: 2,
+    produces: {},
+    consumes: { [ELECTRICITY]: energyPerTurnWh(5_000, CONFIG), regolith: 500 },
     habitatCapacity: 0,
   },
 ])
@@ -597,5 +624,106 @@ describe('resolveTurn — determinism', () => {
   it('should derive the deadline from the mission config, not a literal', () => {
     expect(totalTurns(CONFIG)).toBe(278)
     expect(CONFIG.missionSeconds).toBe(MISSION_DEADLINE_SECONDS)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// aic-svp: a shed structure's REASON, and a ledger shortfall's per-structure
+// attribution, both surviving end-to-end into CycleReport.
+// ---------------------------------------------------------------------------
+// docs/turn-composition-audit.md E4: before this, the colony could compute that it was
+// short some resource, or that a structure went dark, but never say WHICH structure or
+// WHY. Both tests below run a REAL colony through `resolveTurn` — the actual
+// construction/power/brownout/ledger composition, not a hand-built ledger fixture —
+// because the acceptance criterion is that attribution survives the WHOLE seam, not
+// just one module's own unit tests.
+
+describe('resolveTurn — shed structure reasons (aic-svp)', () => {
+  it('should give a shed structure a reason matching the brownout rationale for its priority class', () => {
+    // Exactly the existing "drone charging starves a processor" scenario: one reactor
+    // cannot cover both 10 drones and the hopper, so the hopper — priority
+    // PRIORITY_PROCESSOR_UPSTREAM — is shed.
+    const state = colony({
+      queue: [done('r-1', 'reactor', 0), done('hop-1', 'hopper', 2)],
+      droneRoster: roster(10),
+    })
+    const { report } = resolveTurn(state)
+
+    expect(report.electricity.shedStructureIds).toEqual(['hop-1'])
+    expect(report.shedStructures).toEqual([
+      { id: 'hop-1', reason: rationaleForPriority(PRIORITY_PROCESSOR_UPSTREAM) },
+    ])
+    // Guards against a lookup that returns SOME valid-looking rationale for the WRONG
+    // priority class — a bug `toEqual` against `rationaleForPriority`'s own output
+    // could not, by itself, catch if both sides shared the mistake.
+    expect(report.shedStructures[0]?.reason).toContain('abundant extraction stage')
+  })
+
+  it('should report no shed structures when every operational structure is powered', () => {
+    const state = colony({
+      queue: [done('r-1', 'reactor', 0), done('r-2', 'reactor', 4), done('hop-1', 'hopper', 2)],
+      droneRoster: roster(10),
+    })
+    const { report } = resolveTurn(state)
+    expect(report.electricity.shedStructureIds).toEqual([])
+    expect(report.shedStructures).toEqual([])
+  })
+
+  it('should report no shed structures for an empty colony', () => {
+    const { report } = resolveTurn(colony())
+    expect(report.shedStructures).toEqual([])
+  })
+})
+
+describe('resolveTurn — ledger shortfall attribution (aic-svp)', () => {
+  it('should name the specific structures whose consumption produced a real, colony-driven shortfall', () => {
+    // Two DIFFERENT structure types (see the catalog comment above), both powered by a
+    // single reactor with no drones competing for the budget, both consuming a resource
+    // nothing in this colony produces. The shortfall is genuine: it falls out of the
+    // real construction -> power -> ledger composition, not an assertion about
+    // `applyLedger` in isolation.
+    const state = colony({
+      queue: [
+        done('r-1', 'reactor', 0),
+        done('crush-1', 'crusher-small', 2),
+        done('crush-2', 'crusher-large', 4),
+      ],
+      droneRoster: [],
+    })
+    const { report } = resolveTurn(state)
+
+    // Both crushers stayed powered — proves this is a RESOURCE shortfall, not a power
+    // one, and that binary idle on power did not incidentally erase the scenario.
+    expect(report.electricity.shedStructureIds).toEqual([])
+    expect(report.electricity.poweredStructureIds).toEqual(
+      expect.arrayContaining(['crush-1', 'crush-2']),
+    )
+
+    expect(report.shortfalls).toEqual([{ resource: 'regolith', amount: 800 }])
+    expect(report.shortfallAttribution).toEqual([
+      {
+        resource: 'regolith',
+        contributors: [
+          { id: 'crush-1', amount: 300 },
+          { id: 'crush-2', amount: 500 },
+        ],
+      },
+    ])
+  })
+
+  it('should produce empty shortfall attribution when nothing is short', () => {
+    const state = colony({
+      queue: [done('r-1', 'reactor', 0), done('hop-1', 'hopper', 2)],
+      droneRoster: [],
+    })
+    const { report } = resolveTurn(state)
+    expect(report.shortfalls).toEqual([])
+    expect(report.shortfallAttribution).toEqual([])
+  })
+
+  it('should produce empty shortfall attribution for an empty colony', () => {
+    const { report } = resolveTurn(colony())
+    expect(report.shortfalls).toEqual([])
+    expect(report.shortfallAttribution).toEqual([])
   })
 })

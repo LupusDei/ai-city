@@ -258,6 +258,46 @@ export const BROWNOUT_PRIORITY_CLASSES: readonly BrownoutPriorityClass[] = [
   },
 ]
 
+/**
+ * The catch-all class, looked up by NAME once at module load rather than assumed to be
+ * the array's last element — so `rationaleForPriority`'s fallback survives even if
+ * `BROWNOUT_PRIORITY_CLASSES` is ever reordered. Throws at import time if the
+ * 'unclassified' entry is ever removed, rather than letting the fallback silently
+ * degrade to `undefined` deep inside a turn resolution — the same "fail loudly at the
+ * point of the mistake" instinct the rest of this module already applies to malformed
+ * demands.
+ */
+const UNCLASSIFIED_CLASS: BrownoutPriorityClass = (() => {
+  const found = BROWNOUT_PRIORITY_CLASSES.find((entry) => entry.name === 'unclassified')
+  if (found === undefined) {
+    throw new Error(
+      'brownout.ts: BROWNOUT_PRIORITY_CLASSES is missing its "unclassified" catch-all class',
+    )
+  }
+  return found
+})()
+
+/**
+ * The rationale text for the priority class governing `priority` (aic-svp) — what a
+ * player would read to understand WHY a structure carrying this priority was shed,
+ * threaded into `turn.ts`'s `CycleReport` as `ShedStructureReport.reason`.
+ *
+ * Looks up an EXACT match against `BROWNOUT_PRIORITY_CLASSES` first — the case for
+ * every MVP structure, whose `catalog.ts` `priorityClass` is always one of the six
+ * documented constants. Any other integer — a value a future catalog author places
+ * BETWEEN two classes, which is exactly what the "spaced by 100" design in this
+ * module's header exists to allow — falls back to the 'unclassified' class's
+ * rationale: the same "nobody has reasoned about this yet" logic `PRIORITY_DEFAULT`
+ * already states for an ABSENT `priorityClass`, extended here to a present but
+ * undocumented one. This is what lets a cycle report always have a rationale to show,
+ * for any priority value the catalog could possibly produce, with no throw and no
+ * `undefined`.
+ */
+export function rationaleForPriority(priority: number): string {
+  const exact = BROWNOUT_PRIORITY_CLASSES.find((entry) => entry.priority === priority)
+  return (exact ?? UNCLASSIFIED_CLASS).rationale
+}
+
 // ---------------------------------------------------------------------------
 // Demands and results
 // ---------------------------------------------------------------------------

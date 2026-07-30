@@ -70,6 +70,21 @@ import type { ResourceAmounts } from './catalog'
  * through per-turn netting. See the one-time-vs-per-turn block in `catalog.ts`.
  */
 export interface ResourceFlow {
+  /**
+   * OPTIONAL consumer/producer identity (aic-svp, docs/turn-composition-audit.md E4).
+   *
+   * Absent by default so every pre-existing caller — including a validated
+   * `StructureType` passed directly, and every hand-built test fixture in this file —
+   * remains a `ResourceFlow` with zero changes. When a caller DOES supply one (the
+   * turn loop does, threading a structure instance's own id through
+   * `toResourceFlow`), it is used for exactly one thing: naming which flows had a live
+   * claim on a resource that ran short this turn — see `ShortfallAttribution`. It is
+   * NEVER read by `computeBalances` or by any arithmetic in `applyLedger`; two flows
+   * with the same id, or none at all, net identically to before this field existed.
+   * That is deliberate — identity is reporting metadata, not an accounting key, so
+   * adding it can never change a single balance, stockpile or shortfall AMOUNT.
+   */
+  readonly id?: string
   readonly produces: ResourceAmounts
   readonly consumes: ResourceAmounts
 }
@@ -110,6 +125,51 @@ export interface ResourceBalance {
 export interface Shortfall {
   readonly resource: string
   readonly amount: number
+}
+
+/**
+ * One flow's own claim on a resource that ran short this turn (aic-svp).
+ *
+ * WHY "CONTRIBUTOR" AND NOT "VICTIM" OR "LOSER": `applyLedger` nets every flow's
+ * production and consumption of a resource against ONE shared stockpile — the same
+ * undifferentiated pool of Wh or grams for every consumer — and a `Shortfall` is a
+ * property of that combined NET, not of any single flow's own transaction. There is no
+ * per-consumer rationing model here (see the module header's no-division discipline,
+ * and docs/turn-composition-audit.md B2): the ledger never decides that flow A got its
+ * resource and flow B did not, and inventing such a split just to fill this field would
+ * report a decision nobody actually made. What the ledger CAN say honestly is who had a
+ * live claim on the resource that ran out, and how big that claim was — which is
+ * exactly what a player needs to act on ("cut one of these, or grow the stockpile or
+ * production, and the shortfall goes away").
+ */
+export interface ShortfallContributor {
+  /** The consuming flow's own `ResourceFlow.id`. Only id-bearing flows appear here. */
+  readonly id: string
+  /** This flow's own `consumes[resource]` for the resource that shorted, in base units. */
+  readonly amount: number
+}
+
+/**
+ * Attribution for one entry in `LedgerResult.shortfalls`, at the SAME array index —
+ * `shortfalls[i]` and `shortfallAttribution[i]` always describe the same resource, so a
+ * caller may zip the two by index with no re-matching on `resource`.
+ *
+ * `contributors` lists every flow whose `consumes[resource]` was greater than zero this
+ * turn, ascending by `id` (UTF-16 code-unit order, `<`/`>` — deliberately NOT
+ * `String.prototype.localeCompare`, whose result depends on the host's locale and ICU
+ * version; see `brownout.ts` for the identical rule and the identical reason: two
+ * machines replaying the same colony must list contributors in the same order). NEVER
+ * ordered by the input `flows` array or by any `Map`/`Set` iteration — both are
+ * accidents of the caller, not properties of the colony.
+ *
+ * `contributors` is empty exactly when no consuming flow carried an `id` — an anonymous
+ * flow (see `ResourceFlow.id`) still counts fully toward `net` and the shortfall
+ * `amount`, it simply cannot be named. An empty list here is a valid, expected outcome,
+ * never a crash or an `undefined`.
+ */
+export interface ShortfallAttribution {
+  readonly resource: string
+  readonly contributors: readonly ShortfallContributor[]
 }
 
 /**
@@ -221,6 +281,12 @@ export interface LedgerResult {
   /** Resources whose stockpile would have gone negative this turn, sorted by resource name. */
   readonly shortfalls: readonly Shortfall[]
   /**
+   * Per-structure attribution for each entry in `shortfalls`, at the same index
+   * (aic-svp — see `ShortfallAttribution`). Always the same length as `shortfalls`;
+   * always `[]` when `shortfalls` is `[]`, including for an empty `flows` array.
+   */
+  readonly shortfallAttribution: readonly ShortfallAttribution[]
+  /**
    * Flow resources whose surplus could not be contained and is gone, sorted by
    * resource name. Always empty when no flow resource was declared.
    */
@@ -284,6 +350,38 @@ export function computeBalances(flows: readonly ResourceFlow[]): readonly Resour
 }
 
 /**
+ * Ascending `id` order — UTF-16 code-unit comparison via `<`/`>`, deliberately NOT
+ * `String.prototype.localeCompare` (see `ShortfallAttribution`'s doc for why: a
+ * locale/ICU-dependent order would make two machines disagree about which contributor
+ * a shortfall lists first for the identical colony). Mirrors `brownout.ts`'s
+ * `comparePowerDemands` id tie-break — the same rule, learned once, applied again here.
+ */
+function compareById(a: { readonly id: string }, b: { readonly id: string }): number {
+  if (a.id < b.id) return -1
+  if (a.id > b.id) return 1
+  return 0
+}
+
+/**
+ * Every id-bearing flow with a live (`> 0`) claim on `resource` this turn, ascending by
+ * id. See `ShortfallAttribution` for why this is "contributors", not "who lost" — the
+ * ledger nets everyone against one shared stockpile and never decides a per-flow
+ * winner. A flow with no `id`, or whose `consumes[resource]` is absent or `0`, is
+ * simply not a contributor to THIS resource's shortfall — it may well be a contributor
+ * to another resource's, decided independently by the same filter run again there.
+ */
+function contributorsFor(flows: readonly ResourceFlow[], resource: string): ShortfallContributor[] {
+  const contributors: ShortfallContributor[] = []
+  for (const flow of flows) {
+    const id = flow.id
+    if (id === undefined) continue
+    const amount = flow.consumes[resource] ?? 0
+    if (amount > 0) contributors.push({ id, amount })
+  }
+  return contributors.sort(compareById)
+}
+
+/**
  * Run one turn: net `flows` via `computeBalances`, then apply each resource's
  * net to `stockpiles`.
  *
@@ -328,6 +426,7 @@ export function applyLedger(
 
   const nextStockpiles: Record<string, number> = {}
   const shortfalls: Shortfall[] = []
+  const shortfallAttribution: ShortfallAttribution[] = []
   const vented: Vented[] = []
   const overflow: Overflow[] = []
 
@@ -338,8 +437,11 @@ export function applyLedger(
 
     if (raw < 0) {
       // A deficit is a deficit regardless of policy: running out is running out, and
-      // there is no surplus to discard on a turn that ended short.
+      // there is no surplus to discard on a turn that ended short. `shortfallAttribution`
+      // is pushed at the SAME index as `shortfalls` (both iterate `sortedResources` in
+      // the same order), so a caller may zip them by index with no re-matching.
       shortfalls.push({ resource, amount: -raw })
+      shortfallAttribution.push({ resource, contributors: contributorsFor(flows, resource) })
       nextStockpiles[resource] = 0
       continue
     }
@@ -371,5 +473,12 @@ export function applyLedger(
     nextStockpiles[resource] = carried
   }
 
-  return { balances, stockpiles: nextStockpiles, shortfalls, vented, overflow }
+  return {
+    balances,
+    stockpiles: nextStockpiles,
+    shortfalls,
+    shortfallAttribution,
+    vented,
+    overflow,
+  }
 }

@@ -104,6 +104,7 @@ describe('applyLedger', () => {
       balances: [],
       stockpiles: {},
       shortfalls: [],
+      shortfallAttribution: [],
       vented: [],
       overflow: [],
     })
@@ -841,5 +842,183 @@ describe('applyLedger — flow resources', () => {
       ).stockpiles
     }
     expect(stockpiles.electricity).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// aic-svp: ResourceFlow identity and per-structure shortfall attribution
+// ---------------------------------------------------------------------------
+// E4 in docs/turn-composition-audit.md: `applyLedger` could compute that the colony
+// was short 400 Wh but never say WHICH structure went without. `ResourceFlow` gains an
+// OPTIONAL `id`, and a shortfall now carries `ShortfallAttribution` alongside it,
+// naming every flow with a live claim on the resource that ran out. These tests pin:
+// identity is opt-in (an anonymous flow still nets correctly), attribution order is
+// ascending id (never array or Map/Set order), and the arithmetic this module already
+// guaranteed is untouched by any of it.
+
+describe('applyLedger — shortfall attribution (aic-svp)', () => {
+  it('should attribute a shortfall to the id of the single consuming flow', () => {
+    const result = applyLedger([flow({ id: 'press-1', consumes: { regolith: 500 } })], {})
+    expect(result.shortfalls).toEqual([{ resource: 'regolith', amount: 500 }])
+    expect(result.shortfallAttribution).toEqual([
+      { resource: 'regolith', contributors: [{ id: 'press-1', amount: 500 }] },
+    ])
+  })
+
+  it('should name every consuming flow when more than one shares a shortfall', () => {
+    const result = applyLedger(
+      [
+        flow({ id: 'press-1', consumes: { regolith: 500 } }),
+        flow({ id: 'press-2', consumes: { regolith: 300 } }),
+      ],
+      {},
+    )
+    expect(result.shortfalls).toEqual([{ resource: 'regolith', amount: 800 }])
+    expect(result.shortfallAttribution).toEqual([
+      {
+        resource: 'regolith',
+        contributors: [
+          { id: 'press-1', amount: 500 },
+          { id: 'press-2', amount: 300 },
+        ],
+      },
+    ])
+  })
+
+  it('should keep stable relative order between two contributors sharing the same id', () => {
+    // The ledger does not itself re-validate id uniqueness (that guard lives upstream,
+    // matching this module's documented "does not re-check" boundary — see the module
+    // header). Two flows sharing an id is therefore a caller bug already surfaced
+    // elsewhere, not something this module rejects — but the sort must still behave:
+    // exercises the `a.id === b.id` branch of the id comparator directly.
+    const result = applyLedger(
+      [
+        flow({ id: 'dup', consumes: { regolith: 4 } }),
+        flow({ id: 'dup', consumes: { regolith: 6 } }),
+      ],
+      {},
+    )
+    expect(result.shortfallAttribution).toEqual([
+      {
+        resource: 'regolith',
+        contributors: [
+          { id: 'dup', amount: 4 },
+          { id: 'dup', amount: 6 },
+        ],
+      },
+    ])
+  })
+
+  it('should order contributors ascending by id regardless of the flows array order', () => {
+    const forwards = applyLedger(
+      [
+        flow({ id: 'zebra', consumes: { regolith: 10 } }),
+        flow({ id: 'alpha', consumes: { regolith: 10 } }),
+      ],
+      {},
+    )
+    const backwards = applyLedger(
+      [
+        flow({ id: 'alpha', consumes: { regolith: 10 } }),
+        flow({ id: 'zebra', consumes: { regolith: 10 } }),
+      ],
+      {},
+    )
+    const expectedContributors = [
+      { id: 'alpha', amount: 10 },
+      { id: 'zebra', amount: 10 },
+    ]
+    expect(forwards.shortfallAttribution).toEqual([
+      { resource: 'regolith', contributors: expectedContributors },
+    ])
+    expect(backwards.shortfallAttribution).toEqual(forwards.shortfallAttribution)
+  })
+
+  it('should still net an anonymous (id-less) flow into the arithmetic, but never name it', () => {
+    const result = applyLedger(
+      [
+        flow({ id: 'press-1', consumes: { regolith: 500 } }),
+        // No `id`: an ordinary pre-existing caller, or a fixture that never opted in.
+        flow({ consumes: { regolith: 200 } }),
+      ],
+      {},
+    )
+    // The arithmetic counts both — identity is metadata, never an arithmetic input.
+    expect(result.shortfalls).toEqual([{ resource: 'regolith', amount: 700 }])
+    expect(result.shortfallAttribution).toEqual([
+      { resource: 'regolith', contributors: [{ id: 'press-1', amount: 500 }] },
+    ])
+  })
+
+  it('should attribute nothing when every consuming flow is anonymous', () => {
+    const result = applyLedger([flow({ consumes: { regolith: 500 } })], {})
+    expect(result.shortfalls).toEqual([{ resource: 'regolith', amount: 500 }])
+    expect(result.shortfallAttribution).toEqual([{ resource: 'regolith', contributors: [] }])
+  })
+
+  it('should list a contributor only under the resource it actually consumes', () => {
+    // A flow that draws on TWO resources but only one of them shorts must not leak
+    // into the other resource's attribution, and must report only ITS OWN amount of
+    // the resource that shorted.
+    const result = applyLedger(
+      [
+        flow({ id: 'press-1', consumes: { regolith: 500, electricity: 10 } }),
+        flow({ produces: { electricity: 10 } }),
+      ],
+      {},
+    )
+    expect(result.shortfalls).toEqual([{ resource: 'regolith', amount: 500 }])
+    expect(result.shortfallAttribution).toEqual([
+      { resource: 'regolith', contributors: [{ id: 'press-1', amount: 500 }] },
+    ])
+  })
+
+  it('should produce empty attribution for an empty colony', () => {
+    expect(applyLedger([], {}).shortfallAttribution).toEqual([])
+  })
+
+  it('should produce empty attribution when nothing shorts', () => {
+    const result = applyLedger([flow({ produces: { regolith: 500 } })], {})
+    expect(result.shortfalls).toEqual([])
+    expect(result.shortfallAttribution).toEqual([])
+  })
+
+  it('should keep shortfallAttribution in the same resource order as shortfalls', () => {
+    const result = applyLedger(
+      [
+        flow({ id: 'a', consumes: { zinc: 5 } }),
+        flow({ id: 'b', consumes: { argon: 5 } }),
+      ],
+      {},
+    )
+    expect(result.shortfalls.map((s) => s.resource)).toEqual(['argon', 'zinc'])
+    expect(result.shortfallAttribution.map((s) => s.resource)).toEqual(['argon', 'zinc'])
+  })
+
+  it('should prove the aggregate arithmetic is unchanged by identity: identical totals with or without ids', () => {
+    // The acceptance criterion, made concrete: attribution is ADDITIVE metadata, it
+    // does not redo the arithmetic. Same numbers in, same balances/stockpiles/
+    // shortfalls/vented/overflow out, whether or not any flow carries an id.
+    const withoutIds = applyLedger(
+      [
+        flow({ produces: { electricity: 125_000 }, consumes: { regolith: 1 } }),
+        flow({ consumes: { electricity: 47_531, regolith: 900 } }),
+        flow({ produces: { regolith: 300 } }),
+      ],
+      { electricity: 10, regolith: 5 },
+    )
+    const withIds = applyLedger(
+      [
+        flow({ id: 'reactor-1', produces: { electricity: 125_000 }, consumes: { regolith: 1 } }),
+        flow({ id: 'press-1', consumes: { electricity: 47_531, regolith: 900 } }),
+        flow({ id: 'hopper-1', produces: { regolith: 300 } }),
+      ],
+      { electricity: 10, regolith: 5 },
+    )
+    expect(withIds.balances).toEqual(withoutIds.balances)
+    expect(withIds.stockpiles).toEqual(withoutIds.stockpiles)
+    expect(withIds.shortfalls).toEqual(withoutIds.shortfalls)
+    expect(withIds.vented).toEqual(withoutIds.vented)
+    expect(withIds.overflow).toEqual(withoutIds.overflow)
   })
 })
