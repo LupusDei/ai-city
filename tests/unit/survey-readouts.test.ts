@@ -18,11 +18,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   PENDING_READOUT,
+  candidateMarkerLabel,
   formatHullsPlaced,
   formatMissingHulls,
   formatTile,
   hullLabel,
   landingStatusLine,
+  nextHull,
   rejectionReadout,
   scoreReadout,
 } from '../../src/app/screens/survey-readouts'
@@ -177,6 +179,128 @@ describe('landingStatusLine', () => {
       rejection: { ok: false, reason: 'overlapping-hulls', tile: { x: 3, y: 3 } },
     }
     expect(landingStatusLine(rejected)).toMatch(/refus/i)
+  })
+})
+
+describe('nextHull', () => {
+  it('should name the drone hull first, matching the order the adapter fills slots', () => {
+    expect(nextHull(NOTHING_PLACED)).toBe('drone-hull')
+  })
+
+  it('should name the reactor hull once the drone hull is down', () => {
+    expect(nextHull(ONE_PLACED)).toBe('reactor-hull')
+  })
+
+  it('should name no hull once the landing is complete', () => {
+    // Both slots are full, so a further click commits nothing — which is precisely why
+    // the screen disables the markers rather than leaving them live.
+    expect(nextHull(READY)).toBeNull()
+  })
+
+  it('should name no hull while a committed site stands refused', () => {
+    // A `rejected` readiness carries no `missingHulls`, so there is no honest answer to
+    // "what would the next click place". Null rather than a guess.
+    const rejected: LandingReadiness = {
+      status: 'rejected',
+      rejection: { ok: false, reason: 'overlapping-hulls', tile: { x: 3, y: 3 } },
+    }
+    expect(nextHull(rejected)).toBeNull()
+  })
+
+  it('should read the SIM’s own missingHulls rather than assuming an order', () => {
+    // If the sim ever reported the reactor hull as the only one missing, this must follow
+    // it — the screen must never hold a second opinion about what the landing still owes.
+    const reactorFirst: LandingReadiness = {
+      status: 'incomplete',
+      missingHulls: ['reactor-hull', 'drone-hull'],
+    }
+    expect(nextHull(reactorFirst)).toBe('reactor-hull')
+  })
+
+  it('should survive an incomplete readiness that names no missing hull at all', () => {
+    // Unreachable through `evaluateLanding`, reachable from a hand-built state. An empty
+    // list must read as "nothing to place", never as `undefined` leaking into the DOM.
+    const empty: LandingReadiness = { status: 'incomplete', missingHulls: [] }
+    expect(nextHull(empty)).toBeNull()
+  })
+})
+
+describe('candidateMarkerLabel', () => {
+  const ANCHOR = { x: 11, y: 27 }
+
+  it('should name the tile a marker stands on', () => {
+    const label = candidateMarkerLabel({ anchor: ANCHOR, occupant: null, legal: true, next: null })
+    expect(label).toContain('(11, 27)')
+  })
+
+  it('should say WHICH hull a click would commit, so the gesture is not a mystery', () => {
+    // The screen places the drone hull first and then the reactor hull, and before this
+    // the player had no way to know which one their next click was spending.
+    const label = candidateMarkerLabel({
+      anchor: ANCHOR,
+      occupant: null,
+      legal: true,
+      next: 'drone-hull',
+    })
+    expect(label).toContain('drone hull')
+  })
+
+  it('should name the reactor hull when that is the one the next click fills', () => {
+    const label = candidateMarkerLabel({
+      anchor: ANCHOR,
+      occupant: null,
+      legal: true,
+      next: 'reactor-hull',
+    })
+    expect(label).toContain('reactor hull')
+    expect(label).not.toContain('drone hull')
+  })
+
+  it('should report an already-committed hull rather than what a click would do', () => {
+    const label = candidateMarkerLabel({
+      anchor: ANCHOR,
+      occupant: 'reactor-hull',
+      legal: true,
+      next: null,
+    })
+    expect(label).toMatch(/reactor hull/)
+    expect(label).toMatch(/committed/i)
+  })
+
+  it('should prefer the occupant over the next-hull hint when both apply', () => {
+    // A marker can be occupied while another hull is still awaited. What it IS beats what
+    // clicking it would do — and clicking it would be refused as an overlap anyway.
+    const label = candidateMarkerLabel({
+      anchor: ANCHOR,
+      occupant: 'drone-hull',
+      legal: true,
+      next: 'reactor-hull',
+    })
+    expect(label).toMatch(/committed/i)
+  })
+
+  it('should explain an illegal anchor rather than merely being disabled', () => {
+    const label = candidateMarkerLabel({
+      anchor: ANCHOR,
+      occupant: null,
+      legal: false,
+      next: 'drone-hull',
+    })
+    expect(label).toMatch(/outside the survey grid/i)
+  })
+
+  it('should say why a marker is inert once the landing is complete', () => {
+    // AC-2.4's sibling in spirit: a disabled control that does not explain itself is how a
+    // first-time player gets stuck. The visual lock is stated on screen; this is the same
+    // fact for a screen reader, which cannot see the fade.
+    const label = candidateMarkerLabel({ anchor: ANCHOR, occupant: null, legal: true, next: null })
+    expect(label).toMatch(/re-plot/i)
+  })
+
+  it('should give two different tiles two different labels', () => {
+    const a = candidateMarkerLabel({ anchor: { x: 3, y: 3 }, occupant: null, legal: true, next: null })
+    const b = candidateMarkerLabel({ anchor: { x: 3, y: 11 }, occupant: null, legal: true, next: null })
+    expect(a).not.toBe(b)
   })
 })
 

@@ -177,6 +177,71 @@ export function formatTile(tile: Coord): string {
 }
 
 /**
+ * Which hull the player's NEXT candidate click would commit, or `null` if none would.
+ *
+ * WHY THIS EXISTS. `selectSite` fills the drone hull and then the reactor hull, so a click
+ * on a candidate means something different depending on what is already down — and until
+ * now the screen never said which. The player's first click spent the drone hull with no
+ * warning, and their second the reactor, and the only way to find out was afterwards. That
+ * is the smaller half of "the first real decision is made blind", and it is the half that
+ * needs no score to fix.
+ *
+ * READS THE SIM'S OWN `missingHulls`, and takes its FIRST entry. It does not assume the
+ * order, and it does not recompute what is missing from the selection: `evaluateLanding`
+ * builds that list drone-first, `withNextHull` fills the slots in the same order, and this
+ * function follows whichever order the sim reports rather than holding a second opinion. If
+ * the two ever disagreed, the screen would say what the sim says.
+ *
+ * `null` for `ready` (both slots are full — the click commits nothing, which is why the
+ * markers lock) and for `rejected` (no `missingHulls` field, so there is no honest answer).
+ */
+export function nextHull(readiness: LandingReadiness): HullId | null {
+  if (readiness.status !== 'incomplete') return null
+  return readiness.missingHulls[0] ?? null
+}
+
+/** Everything a candidate marker's accessible name is built from. */
+export interface CandidateMarkerLabelParams {
+  readonly anchor: Coord
+  /** Which hull is already committed at exactly this anchor, from `occupantOf`. */
+  readonly occupant: HullId | null
+  /** Whether the footprint sits inside the grid, from the site's own `legal`. */
+  readonly legal: boolean
+  /** What a click here would commit, from {@link nextHull}. */
+  readonly next: HullId | null
+}
+
+/**
+ * A candidate marker's accessible name — the ONLY place a marker's meaning is expressed.
+ *
+ * Nothing may be DRAWN over the map: AC-1.3 compares the terrain canvas byte for byte
+ * across a reload and the marker layer is inside those bytes, so a visible label on 64
+ * markers would put glyph rasterisation — and therefore font loading — into a determinism
+ * check. Every one of the four states below is carried here instead, where assistive
+ * technology reads it and no pixel is painted.
+ *
+ * The four are ordered by what the player most needs to know, and the order matters:
+ *
+ *   1. ILLEGAL first. A marker that is never clickable should say so before it says
+ *      anything about what clicking it would do.
+ *   2. OCCUPIED next. What a marker IS beats what clicking it would do — and clicking an
+ *      occupied anchor is the refusal AC-2.3 provokes, not a placement.
+ *   3. WHAT A CLICK WOULD COMMIT, when a slot is still open.
+ *   4. WHY IT IS INERT, when none is. A disabled control that does not explain itself is
+ *      how a first-time player gets stuck; the lock is stated on screen for a player who
+ *      can see the fade, and here for one who cannot.
+ */
+export function candidateMarkerLabel(params: CandidateMarkerLabelParams): string {
+  const { anchor, occupant, legal, next } = params
+  const where = `Candidate touchdown point ${formatTile(anchor)}`
+
+  if (!legal) return `${where} — outside the survey grid`
+  if (occupant !== null) return `${where} — ${hullLabel(occupant)} committed here`
+  if (next !== null) return `${where} — commits the ${hullLabel(next)}`
+  return `${where} — landing complete; re-plot to choose again`
+}
+
+/**
  * A rejection, decomposed for display WITHOUT touching its reason.
  *
  * FR-006: "illegal actions MUST surface the sim's typed rejection reason verbatim, not a

@@ -23,13 +23,23 @@
  * here is chasing a coverage number. Every assertion is here because it can catch something.
  */
 
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SurveyScreen } from '../../src/app/screens/SurveyScreen'
-import { candidateSites, candidateTestId } from '../../src/app/screens/candidate-sites'
+import {
+  candidateGrounds,
+  candidateSites,
+  candidateTestId,
+  groundInk,
+} from '../../src/app/screens/candidate-sites'
 import { PENDING_READOUT } from '../../src/app/screens/survey-readouts'
-import { MAP_DIMENSION, beginSurvey, dispatch } from '../../src/app/state/game-state'
+import {
+  MAP_DIMENSION,
+  beginSurvey,
+  dispatch,
+  previewLanding,
+} from '../../src/app/state/game-state'
 import { createGrid } from '../../src/sim/grid'
 import type { SurveyingState } from '../../src/app/state/game-state'
 import { formatDepositCount, formatGridDimensions } from '../../src/app/world-readouts'
@@ -225,6 +235,238 @@ describe('SurveyScreen — candidate touchdown points', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Saying what a click would do, BEFORE it is spent
+// ---------------------------------------------------------------------------
+
+describe('SurveyScreen — which hull the next click commits', () => {
+  it('should announce the drone hull as next before anything is committed', () => {
+    // `selectSite` fills the drone hull first, and until this the player had no way to know
+    // that: their first click spent a hull whose identity they learned afterwards.
+    renderScreen(surveying())
+    expect(document.querySelector('.plate__markers')?.getAttribute('data-next')).toBe('drone-hull')
+  })
+
+  it('should announce the reactor hull as next once the drone hull is down', () => {
+    renderScreen(afterSelecting(0))
+    expect(document.querySelector('.plate__markers')?.getAttribute('data-next')).toBe(
+      'reactor-hull',
+    )
+  })
+
+  it('should announce no pending hull once the landing is complete', () => {
+    // The markers are locked, so advertising a gesture that commits nothing would be the
+    // same defect as leaving them live: a control that silently does nothing.
+    renderScreen(afterSelecting(0, 1))
+    expect(document.querySelector('.plate__markers')?.hasAttribute('data-next')).toBe(false)
+  })
+
+  it('should carry the hull a click would commit in each marker’s accessible name', () => {
+    // The ONLY place this can be said on the map: AC-1.3 forbids drawing a glyph over the
+    // canvas, so a sighted player reads it from the reticle's colour and a screen-reader
+    // user reads it from here.
+    renderScreen(afterSelecting(0))
+    const marker = screen.getByTestId(candidateTestId(LATTICE[5]?.anchor ?? { x: 0, y: 0 }))
+    expect(marker.getAttribute('aria-label')).toMatch(/commits the reactor hull/)
+  })
+
+  it('should say why a marker is inert rather than leaving it silently disabled', () => {
+    renderScreen(afterSelecting(0, 1))
+    const marker = screen.getByTestId(candidateTestId(LATTICE[5]?.anchor ?? { x: 0, y: 0 }))
+    expect(marker.getAttribute('aria-label')).toMatch(/re-plot/i)
+  })
+
+  it('should tag the awaited hull in the landing party, not only on the map', () => {
+    renderScreen(surveying())
+    const next = document.querySelectorAll('.roster__row--next')
+    expect(next).toHaveLength(1)
+    expect(next[0]?.textContent).toMatch(/Drone hull/)
+  })
+
+  it('should move the tag to the reactor hull once the drone hull is committed', () => {
+    renderScreen(afterSelecting(0))
+    const next = document.querySelector('.roster__row--next')
+    expect(next?.textContent).toMatch(/Reactor hull/)
+  })
+
+  it('should tag no hull at all once both are committed', () => {
+    renderScreen(afterSelecting(0, 1))
+    expect(document.querySelectorAll('.roster__row--next')).toHaveLength(0)
+  })
+
+  it('should still report both hulls’ committed coordinates', () => {
+    // The roster rows were rebuilt to carry the NEXT tag; this is the property they existed
+    // for in the first place, pinned so the rebuild cannot have quietly dropped it.
+    const state = afterSelecting(0, 1)
+    renderScreen(state)
+    const rows = document.querySelectorAll('.roster__row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.textContent).toContain(`(${String(LATTICE[0]?.anchor.x)}, `)
+    expect(rows[1]?.textContent).toContain(`(${String(LATTICE[1]?.anchor.x)}, `)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Reading the planet: the markers carry the ground they sit on
+// ---------------------------------------------------------------------------
+
+describe('SurveyScreen — ground quality on the markers', () => {
+  it('should ink each marker from the sim’s buildability under its own footprint', () => {
+    const state = surveying()
+    renderScreen(state)
+    const sites = candidateSites(state.world.grid)
+    const expected = candidateGrounds(sites, state.world.buildability)
+    for (const [index, site] of sites.entries()) {
+      const marker = screen.getByTestId(candidateTestId(site.anchor))
+      expect(marker.style.getPropertyValue('--ground-ink')).toBe(
+        groundInk(expected[index] ?? Number.NaN),
+      )
+    }
+  })
+
+  it('should NOT ink every marker the same, which is the whole point', () => {
+    // Sixty-four identical marks give the player no reason to prefer any of them. A
+    // constant ink would satisfy the test above and leave the screen exactly as it was.
+    renderScreen(surveying())
+    const inks = [...document.querySelectorAll<HTMLElement>('[data-testid^="candidate-site"]')].map(
+      (el) => el.style.getPropertyValue('--ground-ink'),
+    )
+    expect(new Set(inks).size).toBeGreaterThan(8)
+  })
+
+  it('should carry the same reading as an arm length, so it survives pale terrain', () => {
+    const state = surveying()
+    renderScreen(state)
+    const lengths = [...document.querySelectorAll<HTMLElement>('[data-testid^="candidate-site"]')]
+      .map((el) => el.style.getPropertyValue('--tick-len'))
+    expect(new Set(lengths).size).toBeGreaterThan(1)
+    expect(lengths.every((l) => /^\d+px$/.test(l))).toBe(true)
+  })
+
+  it('should leave every marker clickable regardless of how faintly it is inked', () => {
+    // The ink is information, never a gate. A site on poor ground is still the player's to
+    // choose, and only the sim may refuse one.
+    renderScreen(surveying())
+    const markers = [...document.querySelectorAll('[data-testid^="candidate-site"]')]
+    expect(markers.every((el) => !el.hasAttribute('disabled'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The touchdown preview: what this site would score, BEFORE committing to it
+// ---------------------------------------------------------------------------
+
+describe('SurveyScreen — previewing a candidate before committing', () => {
+  /** Point at a marker the way a player does, and let React settle. */
+  function pointAt(anchor: { x: number; y: number }): void {
+    fireEvent.mouseEnter(screen.getByTestId(candidateTestId(anchor)))
+  }
+
+  it('should show nothing at all until the player points at a candidate', () => {
+    renderScreen(surveying())
+    expect(document.querySelector('.preview')).toBeNull()
+  })
+
+  it('should show the sim’s real score for the pair a click would produce', () => {
+    // THE LOAD-BEARING ASSERTION. The preview is read against the verdict the adapter
+    // actually produces for that hypothetical pair, so a preview that showed a plausible
+    // but different number — the only failure mode that matters here — fails.
+    const state = afterSelecting(0)
+    const target = LATTICE[9]
+    if (target === undefined) throw new Error('lattice too small for this test')
+    renderScreen(state)
+    pointAt(target.anchor)
+    const expected = previewLanding(state, target.anchor)
+    if (expected.status !== 'ready') throw new Error('fixture should score')
+    expect(document.querySelector('.preview__total')?.textContent).toBe(
+      expected.breakdown.total.toFixed(1),
+    )
+  })
+
+  it('should preview DIFFERENT scores for two different candidates', () => {
+    // The ★AC-2.2 property, one step earlier in the decision: a constant preview would be
+    // worse than none, because the player would trust it.
+    const state = afterSelecting(0)
+    renderScreen(state)
+    pointAt(LATTICE[9]?.anchor ?? { x: 0, y: 0 })
+    const first = document.querySelector('.preview__total')?.textContent
+    pointAt(LATTICE[40]?.anchor ?? { x: 0, y: 0 })
+    const second = document.querySelector('.preview__total')?.textContent
+    expect(first).not.toBe(second)
+  })
+
+  it('should refuse to invent a number for the very first anchor', () => {
+    // A landing is a PAIR — the sim cannot score one hull, and the screen must say so
+    // rather than fabricate the one number the player would most like to see.
+    renderScreen(surveying())
+    pointAt(LATTICE[9]?.anchor ?? { x: 0, y: 0 })
+    expect(document.querySelector('.preview__total')).toBeNull()
+    expect(document.querySelector('.preview__note')?.textContent).toMatch(/scored as a pair/i)
+  })
+
+  it('should name the hull the previewed click would commit', () => {
+    renderScreen(surveying())
+    pointAt(LATTICE[9]?.anchor ?? { x: 0, y: 0 })
+    expect(document.querySelector('.preview__note')?.textContent).toMatch(/drone hull/)
+  })
+
+  it('should report an occupied anchor as committed, not as a refusal', () => {
+    // The pointer sits on the anchor just clicked more often than anywhere else; flashing
+    // `overlapping-hulls` for the act of not having moved the mouse would be alarming noise.
+    renderScreen(afterSelecting(0))
+    pointAt(LATTICE[0]?.anchor ?? { x: 0, y: 0 })
+    const note = document.querySelector('.preview__note')?.textContent
+    expect(note).toMatch(/already committed/i)
+    expect(note).not.toMatch(/overlapping-hulls/)
+  })
+
+  it('should never let a preview overwrite the COMMITTED score readout', () => {
+    // The acceptance contract reads `site-score`. If hovering changed it, the committed
+    // assessment would flicker as the pointer drifted and ★AC-2.2 would be reading the
+    // mouse rather than the landing.
+    const state = afterSelecting(0, 1)
+    renderScreen(state)
+    if (state.readiness.status !== 'ready') throw new Error('fixture should be ready')
+    const committed = state.readiness.breakdown.total.toFixed(1)
+    pointAt(LATTICE[40]?.anchor ?? { x: 0, y: 0 })
+    expect(screen.getByTestId('site-score').textContent).toBe(committed)
+  })
+
+  it('should not preview at all once both hulls are committed', () => {
+    // Nothing further can be committed, so a preview could only restate the assessment
+    // sitting directly beneath it.
+    renderScreen(afterSelecting(0, 1))
+    pointAt(LATTICE[40]?.anchor ?? { x: 0, y: 0 })
+    expect(document.querySelector('.preview')).toBeNull()
+  })
+
+  it('should clear the preview when the pointer leaves', () => {
+    const target = LATTICE[9]?.anchor ?? { x: 0, y: 0 }
+    renderScreen(afterSelecting(0))
+    pointAt(target)
+    expect(document.querySelector('.preview')).not.toBeNull()
+    fireEvent.mouseLeave(screen.getByTestId(candidateTestId(target)))
+    expect(document.querySelector('.preview')).toBeNull()
+  })
+
+  it('should preview on keyboard focus too, not only under a mouse', () => {
+    // A preview only a mouse can reach is a feature keyboard players do not have.
+    const target = LATTICE[9]?.anchor ?? { x: 0, y: 0 }
+    renderScreen(afterSelecting(0))
+    fireEvent.focus(screen.getByTestId(candidateTestId(target)))
+    expect(document.querySelector('.preview')).not.toBeNull()
+  })
+
+  it('should name the tile being previewed, so the figures have an address', () => {
+    const target = LATTICE[9]?.anchor ?? { x: 0, y: 0 }
+    renderScreen(afterSelecting(0))
+    pointAt(target)
+    expect(document.querySelector('.preview__tile')?.textContent).toBe(
+      `(${String(target.x)}, ${String(target.y)})`,
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
 // US2 — the score, the refusals, and the begin control
 // ---------------------------------------------------------------------------
 
@@ -354,6 +596,18 @@ describe('SurveyScreen — the landing assessment (US2)', () => {
   it('should keep the score pending while a refusal stands, never showing a stale total', () => {
     renderScreen(afterSelecting(0, 0))
     expect(screen.getByTestId('site-score').textContent).toBe(PENDING_READOUT)
+  })
+
+  it('should explain WHY the assessment is dashes rather than leaving a blank panel', () => {
+    // A panel of em dashes with no explanation reads as a broken screen. The reason is
+    // structural — every component is a property of the PAIR — so it is worth one sentence.
+    renderScreen(afterSelecting(0))
+    expect(document.querySelector('.component__pending')?.textContent).toMatch(/pair/i)
+  })
+
+  it('should drop that explanation once the sim has a real assessment to show', () => {
+    renderScreen(afterSelecting(0, 1))
+    expect(document.querySelector('.component__pending')).toBeNull()
   })
 })
 

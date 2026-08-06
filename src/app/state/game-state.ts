@@ -395,6 +395,49 @@ export function placedHulls(selection: LandingSelection): readonly HullId[] {
   return placed
 }
 
+/**
+ * The sim's verdict on the landing the player WOULD have if they committed `anchor` next —
+ * without committing it, and without changing anything.
+ *
+ * WHY THIS IS HERE RATHER THAN IN THE SURVEY SCREEN. The screen wants to answer "what would
+ * this site score" while the player is merely hovering a candidate, so the opening decision
+ * is a choice rather than a guess. That answer can only come from `evaluateLandingOn`, and
+ * `tests/unit/app-boundary.test.ts` lists that function among the sim transitions only this
+ * directory may call. The rule is right: a component evaluating a hypothetical pair would be
+ * a SECOND source of truth for the same number the assessment panel already shows, and the
+ * two could drift. So the screen asks the adapter, the adapter asks the sim, and a landing
+ * verdict has exactly one code path whether the landing is committed or merely considered.
+ *
+ * A READ, NOT AN INTENT. It returns a `LandingReadiness` and no state at all — nothing is
+ * stored, no action is dispatched, and `state` is not touched. That is deliberate on two
+ * counts. Hovering is not a player ACTION in FR-004's sense: nothing about the game changes,
+ * so routing it through `dispatch` would put the mouse's position into the game's state and,
+ * with it, into ★AC-4.3's determinism check. And because it writes nothing, a preview can
+ * never disagree with the committed verdict by going stale.
+ *
+ * IT PREVIEWS THE NEXT EMPTY SLOT, via the same `withNextHull` the real selection uses — so
+ * the preview is scored against exactly the selection a click would produce, not against a
+ * pair this function invented. Three consequences worth naming, all of them honest rather
+ * than papered over:
+ *
+ *   - WITH NO HULL DOWN the result is `incomplete`, not a score. A landing is a PAIR and
+ *     every component of it is a property of both hulls together (buildability across both
+ *     footprints, proximity averaged over both anchors, the separation between them), so
+ *     the sim cannot score one anchor and this must not pretend otherwise. The FIRST click
+ *     genuinely cannot be previewed with a number; the screen says so in as many words.
+ *   - WITH BOTH HULLS DOWN there is no slot to fill, so the committed `readiness` is
+ *     returned unchanged — the same no-op shape `selectSite` produces, and the same fact
+ *     that makes the screen disable every marker in that state.
+ *   - A REFUSAL IS A LEGITIMATE PREVIEW, and the useful one: hovering the anchor already
+ *     used returns the sim's `overlapping-hulls` verbatim, which is strictly better shown
+ *     before the click than after it.
+ */
+export function previewLanding(state: SurveyingState, anchor: Coord): LandingReadiness {
+  const selection = withNextHull(state.selection, anchor)
+  if (selection === null) return state.readiness
+  return evaluateLandingOn(state.world, selection)
+}
+
 // ---------------------------------------------------------------------------
 // Intent handlers
 // ---------------------------------------------------------------------------

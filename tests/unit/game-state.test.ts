@@ -39,6 +39,7 @@ import {
   beginSurvey,
   dispatch,
   placedHulls,
+  previewLanding,
 } from '../../src/app/state/game-state'
 import type { GameAction, GameState, RunningState, SurveyingState } from '../../src/app/state/game-state'
 
@@ -701,5 +702,99 @@ describe('clear-selection (re-plot the landing)', () => {
     const cleared = dispatch(opening, { kind: 'clear-selection' }) as SurveyingState
     expect(cleared.selection).toEqual(opening.selection)
     expect(cleared.world).toBe(opening.world)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// previewLanding — scoring a site the player has NOT committed to
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY THIS IS ON THE ADAPTER AND NOT IN THE SCREEN. `evaluateLandingOn` is on
+ * `app-boundary.test.ts`'s list of sim transitions that only `src/app/state/` may call, and
+ * that rule is right: a component scoring a hypothetical pair would be a second source of
+ * truth for the number the assessment panel already shows. So the survey screen's hover
+ * preview asks the adapter, and the adapter asks the sim — ONE code path for a landing
+ * verdict, whether the landing is committed or merely being considered.
+ *
+ * It stores nothing and returns no state, which is what keeps it safe for ★AC-4.3: a pure
+ * read cannot introduce ordering or time into the dispatch path, and a preview that wrote
+ * to state would put the player's mouse position into the game.
+ */
+describe('previewLanding', () => {
+  /** The opening state with the drone hull committed at SITE_A. */
+  function oneDown(): SurveyingState {
+    return asSurveying(dispatch(beginSurvey({ seed: SEED }), { kind: 'select-site', anchor: SITE_A }))
+  }
+
+  it('should score a hypothetical pair once one hull is already committed', () => {
+    expect(previewLanding(oneDown(), SITE_B).status).toBe('ready')
+  })
+
+  it('should agree exactly with the verdict the player gets by committing that site', () => {
+    // The whole point of a preview: it must be the SAME verdict, or it is a lie that makes
+    // the decision worse than no preview at all.
+    const state = oneDown()
+    const preview = previewLanding(state, SITE_B)
+    const committed = asSurveying(dispatch(state, { kind: 'select-site', anchor: SITE_B }))
+    expect(preview).toEqual(committed.readiness)
+  })
+
+  it('should report a hypothetical pair as incomplete when NO hull is down yet', () => {
+    // A landing is a PAIR, so one anchor — committed or merely hovered — cannot be scored.
+    // The screen must say so rather than invent a number for the first click.
+    expect(previewLanding(beginSurvey({ seed: SEED }), SITE_A).status).toBe('incomplete')
+  })
+
+  it('should refuse a hypothetical overlap with the sim’s own typed reason', () => {
+    // Hovering the anchor you already used is the one refusal a player will actually hit,
+    // and showing it BEFORE the click is strictly better than showing it after.
+    const preview = previewLanding(oneDown(), SITE_A)
+    if (preview.status !== 'rejected') throw new Error('an overlap must be refused')
+    expect(preview.rejection.reason).toBe('overlapping-hulls')
+  })
+
+  it('should refuse a hypothetical anchor that runs off the grid', () => {
+    const preview = previewLanding(oneDown(), OUT_OF_BOUNDS)
+    if (preview.status !== 'rejected') throw new Error('an out-of-bounds anchor must be refused')
+    expect(preview.rejection.reason).toBe('out-of-bounds')
+  })
+
+  it('should score two different hypothetical sites differently', () => {
+    // The preview's reason for existing. A constant preview would satisfy every other
+    // assertion here while telling the player nothing — the ★AC-2.2 property, one step
+    // earlier in the decision.
+    const state = oneDown()
+    const toB = previewLanding(state, SITE_B)
+    const toC = previewLanding(state, SITE_C)
+    if (toB.status !== 'ready' || toC.status !== 'ready') throw new Error('both should score')
+    expect(toB.score).not.toBe(toC.score)
+  })
+
+  it('should fill the NEXT empty slot, leaving the committed hull where it is', () => {
+    const preview = previewLanding(oneDown(), SITE_B)
+    if (preview.status !== 'ready') throw new Error('should score')
+    // The drone hull's committed footprint is still the one the preview scored against.
+    expect(preview.droneHullTiles[0]).toEqual(SITE_A)
+  })
+
+  it('should report the committed landing unchanged when both hulls are already down', () => {
+    // Nothing further can be committed, so there is no hypothesis to evaluate — which is
+    // the same fact that makes the screen disable every marker in that state.
+    const both = readySurvey()
+    expect(previewLanding(both, SITE_C)).toEqual(both.readiness)
+  })
+
+  it('should not mutate the state it previews from', () => {
+    const state = oneDown()
+    const selectionBefore = structuredClone(state.selection)
+    previewLanding(state, SITE_B)
+    expect(state.selection).toEqual(selectionBefore)
+    expect(state.readiness.status).toBe('incomplete')
+  })
+
+  it('should be pure — the same state and anchor give an equal verdict every time', () => {
+    const state = oneDown()
+    expect(previewLanding(state, SITE_B)).toEqual(previewLanding(state, SITE_B))
   })
 })
