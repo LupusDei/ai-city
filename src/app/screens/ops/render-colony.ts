@@ -61,7 +61,7 @@ import type { ConstructionQueue } from '../../../sim/construction'
 import type { World } from '../../../sim/world'
 import type { Rgb } from '../../canvas/mars-palette'
 import { MARS_VOID, rgbCss, rgbaCss } from '../../canvas/mars-palette'
-import { DEFAULT_TILE_SIZE, renderWorld } from '../../canvas/render-world'
+import { DEFAULT_TILE_SIZE, normaliseTileSize, renderWorld } from '../../canvas/render-world'
 import type { Painter2D } from '../../canvas/render-world'
 
 /**
@@ -161,22 +161,6 @@ export interface RenderColonyParams {
   readonly tileSize?: number
 }
 
-/**
- * Normalise a tile size for THIS module's own drawing, mirroring `render-world.ts`.
- *
- * The duplication is deliberate and it is the smaller of two evils. `renderWorld`'s
- * `normaliseTileSize` is private to a file this bead does not own — `src/app/canvas/` is
- * shared with the survey screen, and the one thing that must not happen while two screens
- * are being redesigned in parallel is an edit to the module they both depend on. Six lines
- * that agree with it, and a test that pins the agreement at the sizes that matter, is
- * cheaper than a cross-agent collision in the renderer AC-1.3 screenshots.
- *
- * If `src/app/canvas/render-world.ts` ever exports its own, delete this and import that.
- */
-function plateTileSize(tileSize: number): number {
-  if (!Number.isFinite(tileSize) || tileSize <= 0) return 0
-  return Math.floor(tileSize)
-}
 
 /**
  * Draw the colony: the surveyed world, then its structures. Never throws.
@@ -191,7 +175,7 @@ export function renderColony(painter: Painter2D, params: RenderColonyParams): vo
   // layer below inherits a known-clean context exactly as the terrain does.
   renderWorld(painter, world, { tileSize })
 
-  const size = plateTileSize(tileSize)
+  const size = normaliseTileSize(tileSize)
   if (size === 0) return
 
   // FILLS FIRST, ACROSS EVERY STRUCTURE, THEN RIMS — not fill-and-rim per structure. Two

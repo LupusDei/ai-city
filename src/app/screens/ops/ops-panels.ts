@@ -57,6 +57,34 @@
  * Pure functions of their arguments: no clock, no randomness, no locale. Digit grouping
  * comes from `ops-view.ts`'s `groupDigits` for the reason its docblock gives.
  */
+/**
+ * DECISION RECORDED (raynor): the supply percentage stays OUT of this module.
+ *
+ * I told the implementing agent to build it here, reasoning that the `<meter>` already
+ * divides supplied by demanded in the browser, so a tested pure function would be the same
+ * arithmetic made legible — and that §4 forbids a component DECIDING something the sim owns
+ * (a threshold, a ranking, a verdict), not displaying a ratio of two sim fields.
+ *
+ * Having then read the argument this module and `OpsScreen` actually make, I reversed. Two
+ * reasons, and the second is the one that decided it:
+ *
+ *   1. The screen already communicates the crisis without it. The headline carries supplied
+ *      and demanded as explicit figures, the meter carries the proportion, a BROWNOUT badge
+ *      carries the sim's own verdict, and the banner names the consequence — 26 of 33 drones
+ *      held offline. A percentage adds precision, not understanding, and the consequence is
+ *      the actionable half.
+ *   2. The boundary "no proportion is ever HELD in the app layer" is simple, checkable and
+ *      has no exceptions. "A proportion may be held when it is only for display" is a
+ *      boundary with a judgement call in it, and every future author gets to make that call
+ *      alone. This project has been bitten repeatedly by rules that were true when written
+ *      and quietly stopped being true; a bright line survives that, a nuanced one does not.
+ *
+ * If the percentage is ever genuinely wanted as text, the honest route is a field on
+ * `ElectricityResult` in `src/sim/power.ts` — the sim owning its own margin — and NOT a
+ * division here. Note that would be the first ratio in an integer-disciplined sim, which is
+ * a real cost and should be weighed rather than assumed.
+ */
+
 
 import type { OpsView } from './ops-view'
 import { groupDigits } from './ops-view'

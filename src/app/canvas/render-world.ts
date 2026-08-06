@@ -178,8 +178,15 @@ export interface RenderWorldOptions {
  * by the browser in a way not worth leaving to a byte-comparison test, and a negative one
  * throws `IndexSizeError`. Spec 005's zero-size-canvas edge case requires not throwing,
  * so a nonsensical tile size degrades to an empty canvas.
+ *
+ * EXPORTED (not private) because the colony renderer needs to agree with it exactly. It was
+ * briefly duplicated there — deliberately, to avoid editing this module while two screens
+ * were being redesigned in parallel against it, which was the right call at the time. But a
+ * six-line copy of a rule in a determinism-critical path is the same drift risk that made
+ * us delete the second copy of `mulberry32` earlier in this project: two implementations
+ * that agree today and are free to disagree tomorrow, with nothing failing when they do.
  */
-function normaliseTileSize(tileSize: number): number {
+export function normaliseTileSize(tileSize: number): number {
   if (!Number.isFinite(tileSize) || tileSize <= 0) return 0
   return Math.floor(tileSize)
 }
