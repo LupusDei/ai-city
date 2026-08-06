@@ -21,6 +21,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  formatLandingScore,
   formatWattHours,
   groupDigits,
   lastCycleSummary,
@@ -282,6 +283,67 @@ describe('lastCycleSummary', () => {
     expect(summary?.completedThisTurn).toEqual([])
     expect(summary?.ventedElectricityWh).toBe(GOLDEN.ventedElectricityWh)
     expect(summary?.cutLine).toBe(GOLDEN.cutLine)
+  })
+})
+
+describe('formatLandingScore', () => {
+  it('should render the score the way the survey screen rendered it', () => {
+    // The raw float reached the player: "Landing site scored 55.19023601229619". Fourteen
+    // decimal places of a weighted sum of three decay curves, on screen, in a game.
+    expect(formatLandingScore(55.19023601229619)).toBe('55.2')
+  })
+
+  it('should keep a decimal place on a whole score rather than dropping it', () => {
+    // "72" beside "55.2" reads as two different quantities. `toFixed` pads; `Math.round`
+    // and template interpolation would not.
+    expect(formatLandingScore(72)).toBe('72.0')
+  })
+
+  it('should not depend on the host locale', () => {
+    // The same hazard `groupDigits` guards: `toLocaleString` renders "55,2" across much of
+    // Europe, and every golden assertion in this file would become a locale-dependent one.
+    expect(formatLandingScore(55.19023601229619)).toContain('.')
+  })
+
+  it('should render the sim’s own score for a real landing', () => {
+    // The selector's value, not a literal: this is the string that reaches the screen. The
+    // fixture's anchors (10,10) and (30,30) score 48.6; the acceptance suite clicks the
+    // first two OFFERED candidates and gets a different landing, which is why the 55.19
+    // above is a raw float from the browser and this is a different number. Both are the
+    // sim's; neither is this module's.
+    const raw = viewOf(startedColony()).landingScore
+    expect(formatLandingScore(raw)).toBe('48.6')
+    // The defect being fixed, stated as an assertion: the unformatted value is a float
+    // whose default rendering runs to fourteen decimal places.
+    expect(String(raw).length).toBeGreaterThan('48.6'.length)
+  })
+})
+
+describe('the queue the colony plate draws', () => {
+  it('should carry the colony’s structures by reference, never a copy or a rebuild', () => {
+    // Identity, not equality. The plate draws where the SIM put the hulls; a view that
+    // rebuilt the queue could put them somewhere the placement path never approved, which
+    // is the aic-c1p defect drawn in pixels.
+    const state = startedColony()
+    expect(viewOf(state).queue).toBe(state.colony.queue)
+  })
+
+  it('should carry both landed hulls, in the order the colony landed them', () => {
+    const { queue } = viewOf(startedColony())
+    expect(queue.map((project) => project.structureType.id)).toEqual([
+      'drone-hull',
+      'reactor-hull',
+    ])
+  })
+
+  it('should carry the resolved footprint tiles the sim placed, not a bare anchor', () => {
+    // The fixture lands the drone hull at (10, 10) and HULL_FOOTPRINT is the 2x2 block.
+    expect(viewOf(startedColony()).queue[0]?.tiles).toEqual([
+      { x: 10, y: 10 },
+      { x: 11, y: 10 },
+      { x: 10, y: 11 },
+      { x: 11, y: 11 },
+    ])
   })
 })
 

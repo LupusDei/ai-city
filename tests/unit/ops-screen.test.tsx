@@ -34,6 +34,7 @@ import { useState, type JSX } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OpsScreen } from '../../src/app/screens/ops/OpsScreen'
+import { OPS_TILE_SIZE } from '../../src/app/screens/ops/render-colony'
 import { dispatch } from '../../src/app/state/game-state'
 import type { RunningState } from '../../src/app/state/game-state'
 import { createGrid } from '../../src/sim/grid'
@@ -165,6 +166,86 @@ describe('OpsScreen at turn 1', () => {
   it('should not claim a last cycle before one has resolved', () => {
     renderOps(startedColony())
     expect(screen.queryByTestId('last-cycle-turn')).toBeNull()
+  })
+})
+
+describe('OpsScreen shows the colony it is commanding', () => {
+  it('should put the colony map on the screen', () => {
+    // THE DEFECT THIS REDESIGN EXISTED TO FIX. The player spends the opening minute reading
+    // terrain and siting two hulls, and then the operations screen showed them four rows of
+    // number cards in which the colony did not appear at all. A regression here would look
+    // like nothing on a page full of correct figures, which is exactly why it is asserted.
+    renderOps(startedColony())
+    expect(screen.getByTestId('colony-canvas')).toBeTruthy()
+  })
+
+  it('should draw the map from the SURVEYED world, at the colony’s own grid size', () => {
+    // The aic-c1p guard applied to the picture: a plate sized from a fresh default grid
+    // rather than the surveyed one would render happily and be about a different planet.
+    const state = startedColony()
+    const canvas = screen.queryByTestId('colony-canvas')
+    expect(canvas).toBeNull()
+    renderOps(state)
+    const plate = screen.getByTestId('colony-canvas')
+    if (!(plate instanceof HTMLCanvasElement)) throw new Error('colony-canvas must be a <canvas>')
+    expect(plate.width).toBe(state.world.grid.width * OPS_TILE_SIZE)
+    expect(plate.height).toBe(state.world.grid.height * OPS_TILE_SIZE)
+  })
+
+  it('should list the structures the colony actually owns, by the catalog’s names', () => {
+    renderOps(startedColony())
+    const list = screen.getByLabelText('Standing structures')
+    expect(list.textContent).toContain('Drone Hold (landed)')
+    expect(list.textContent).toContain('Reactor Hold (landed)')
+  })
+
+  it('should show the landing score to one decimal, never the raw float', () => {
+    // "Landing site scored 55.19023601229619" was on screen. The fixture's own landing
+    // scores 48.6; what is asserted is that FOURTEEN DECIMALS never reach the player.
+    renderOps(startedColony())
+    const screenText = screen.getByTestId('ops-screen').textContent
+    expect(screenText).toContain('48.6')
+    expect(screenText).not.toContain('48.60')
+    expect(screenText).not.toMatch(/\d\.\d{3}/)
+  })
+})
+
+describe('OpsScreen makes the crisis legible', () => {
+  it('should lead with a headline naming the brownout and what it cost', () => {
+    // Turn 1 is one reactor against 33 drones, so the colony opens in a brownout with 26
+    // drones idle. The old screen styled that identically to "Colony grid 64 x 64".
+    renderOps(startedColony())
+    expect(screen.getByRole('status').textContent).toBe(
+      'Brownout — 26 of 33 drones held offline',
+    )
+  })
+
+  it('should mark the power constraint as critical, not as ordinary', () => {
+    // The tone attribute is what the stylesheet colours from, so this is the assertion that
+    // a green bar over a starved grid cannot come back. It reads the sim's own brownout
+    // verdict — see `ops-panels.ts`.
+    renderOps(startedColony())
+    expect(screen.getByLabelText('Power').getAttribute('data-tone')).toBe('critical')
+    expect(screen.getByLabelText('Drones on shift').getAttribute('data-tone')).toBe('critical')
+  })
+
+  it('should NOT mark the clock as critical merely because power is', () => {
+    // Three constraints, classified independently. A screen that reddened everything on a
+    // brownout would be as uninformative as one that reddened nothing.
+    renderOps(startedColony())
+    expect(screen.getByLabelText('Turns to the wave').getAttribute('data-tone')).toBe('nominal')
+  })
+
+  it('should express the power constraint as a meter over the sim’s two figures', () => {
+    // The proportion is DISPLAYED without ever being COMPUTED here: the browser divides
+    // value by max. A percentage calculated in this component would be the arithmetic on
+    // game state that constitution §4 forbids.
+    const state = startedColony()
+    renderOps(state)
+    const meter = screen.getByLabelText('Power supplied against demand')
+    if (!(meter instanceof HTMLMeterElement)) throw new Error('the power gauge must be a <meter>')
+    expect(meter.value).toBe(state.outlook?.electricity.suppliedWh)
+    expect(meter.max).toBe(state.outlook?.electricity.totalDemandWh)
   })
 })
 

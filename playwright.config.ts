@@ -15,7 +15,18 @@ import { defineConfig, devices } from '@playwright/test'
  * the failures are the work queue.
  */
 
-const PORT = 5173
+/**
+ * Dev-server port for the acceptance run.
+ *
+ * Overridable via `AIC_ACCEPTANCE_PORT` so that parallel git worktrees can each run the
+ * suite without colliding. With `reuseExistingServer: false` below, two worktrees sharing
+ * a port means the second run fails loudly — correct, but it also blocks work. Giving each
+ * its own port means neither blocks nor lies.
+ *
+ * Vite's default is 5173, and `npm run dev` is what `webServer.command` starts, so the port
+ * is passed through to it explicitly below rather than hoped for.
+ */
+const PORT = Number(process.env['AIC_ACCEPTANCE_PORT'] ?? 5173)
 const BASE_URL = `http://localhost:${PORT}`
 
 /** GitHub Actions and most CI providers set this; used only to tighten behaviour. */
@@ -61,11 +72,23 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npm run dev',
+    command: `npm run dev -- --port ${String(PORT)} --strictPort`,
     url: BASE_URL,
-    // Locally, reuse a dev server the developer already has open; in CI always start a
-    // clean one so a stale process cannot serve a stale bundle.
-    reuseExistingServer: !isCI,
+    // NEVER reuse an existing server, locally or in CI.
+    //
+    // This was `!isCI`, on the reasonable-sounding grounds that a developer with a dev
+    // server already open should not have to wait for a second one. In a fleet of parallel
+    // git worktrees that convenience is a CORRECTNESS BUG, and I hit it the same hour it
+    // was reported: I ran the acceptance suite in this worktree while another agent's vite
+    // was serving port 5173 from ITS worktree, and the suite happily tested that agent's
+    // code and would have reported it as mine.
+    //
+    // A suite that silently tests a different tree than the one it lives in is the worst
+    // kind of gate — it does not fail, it lies, and it lies most convincingly when two
+    // people are working at once, which is exactly when you need it. Starting a fresh
+    // server costs a couple of seconds; with this false, a busy port makes Playwright fail
+    // LOUDLY instead, which is the correct outcome.
+    reuseExistingServer: false,
     timeout: 120_000,
     stdout: 'pipe',
     stderr: 'pipe',

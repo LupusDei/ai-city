@@ -38,6 +38,7 @@
  * here.
  */
 
+import type { ConstructionQueue } from '../../../sim/construction'
 import type { Vented } from '../../../sim/ledger'
 import type { MissionOutcome } from '../../../sim/mission'
 import { ELECTRICITY } from '../../../sim/power'
@@ -83,6 +84,37 @@ export function groupDigits(value: number): string {
  */
 export function formatWattHours(wattHours: number): string {
   return `${groupDigits(wattHours)} Wh`
+}
+
+/**
+ * One decimal place on the total, matching `survey-readouts.ts`'s `TOTAL_DECIMALS`.
+ *
+ * The two screens show the SAME number and must therefore show it the same way — the survey
+ * screen renders `breakdown.total.toFixed(1)` and the operations screen renders
+ * `landing.score`, which the sim documents as equal to it. A player who saw "55.2" while
+ * choosing and "55.19023601229619" while playing would reasonably conclude the game had
+ * recomputed their landing.
+ *
+ * It is duplicated rather than imported because `survey-readouts.ts` keeps the constant
+ * private and belongs to the survey screen; reaching into it would couple this screen to
+ * another one's internals for a single digit. If a third screen ever needs it, the pair
+ * belongs in `world-readouts.ts` alongside the other cross-screen formatters — which exists
+ * for precisely this hazard.
+ */
+const LANDING_SCORE_DECIMALS = 1
+
+/**
+ * The landing score as the player read it while choosing: `"55.2"`, never
+ * `"55.19023601229619"`.
+ *
+ * Fourteen decimal places is what `String(score)` produced, and it was on screen. It is not
+ * merely untidy — it is the float's internal representation escaping into the fiction, and
+ * it implies a precision that three hyperbolic decay curves evaluated at tile resolution do
+ * not have. `toFixed` rounds half away from zero deterministically for these magnitudes and
+ * is locale-independent, unlike `toLocaleString`; see {@link groupDigits}.
+ */
+export function formatLandingScore(score: number): string {
+  return score.toFixed(LANDING_SCORE_DECIMALS)
 }
 
 /**
@@ -132,6 +164,30 @@ export interface OpsView {
    * rather than regenerating it, which is what makes ★AC-3.2 possible at all.
    */
   readonly world: World
+  /**
+   * Every structure standing on the colony, complete or not — `ColonyState.queue`, by
+   * reference and unchanged.
+   *
+   * Here so the colony plate can DRAW the colony. `render-colony.ts` reads each project's
+   * `tiles`, which `queueConstruction` wrote through the sim's own placement path, so the
+   * map shows where the simulation actually put things rather than where a component
+   * calculated they should go. Carried on the view rather than read off `state.colony` in
+   * the layout for the reason this whole module exists: one place answers "what does the
+   * screen see".
+   */
+  readonly queue: ConstructionQueue
+  /**
+   * Structure instance ids the colony has taken OUT OF SERVICE — destroyed, damaged, or shut
+   * down for maintenance — as distinct from not yet built. `ColonyState.offlineStructureIds`,
+   * by reference.
+   *
+   * Paired with {@link queue} because the two together answer "what do I own, and is it
+   * running", and neither answers it alone: the queue holds every instance whether or not it
+   * operates, and this list holds ids with no footprint attached. An offline generator
+   * produces nothing and an offline consumer draws nothing, so this is the difference between
+   * a structure the player can count on and one they cannot.
+   */
+  readonly offlineStructureIds: readonly string[]
   /** The turn now in progress (1, then 2, ...), or the final turn once the mission is over. */
   readonly turn: number
   /** The mission length: `totalTurns(turnCycle)`, i.e. 278. A pure sim read. */
@@ -204,6 +260,8 @@ export function opsView(state: RunningState): OpsView | null {
 
   return {
     world: state.world,
+    queue: state.colony.queue,
+    offlineStructureIds: state.colony.offlineStructureIds,
     turn: report.turn,
     totalTurns: totalTurns(state.colony.mission.turnCycle),
     turnsRemaining: report.mission.turnsRemaining,
