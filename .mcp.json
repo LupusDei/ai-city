@@ -7,6 +7,13 @@
         "X-Agent-Id": "raynor",
         "X-Project-Root": "/Users/Reason/code/ai/ai-city/worktrees/raynor"
       }
+    },
+    "playwright-test": {
+      "command": "npx",
+      "args": [
+        "playwright",
+        "run-test-mcp-server"
+      ]
     }
   }
 }
