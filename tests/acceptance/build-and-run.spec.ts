@@ -15,11 +15,23 @@
  * figures to MOVE across turns. A tray that changes no number is the same defect one layer
  * up, and it would pass every other assertion in this file.
  *
- * ★AC-B4 is the other one that matters: building must COST something. `buildCost` is
- * currently debited nowhere — `turn.ts` scopes it out explicitly and `applyOrders`, the
- * caller it names, does not charge it. A free build is worse than no build: it makes the
- * silica chain, the regolith chain, the 450 t berms and the stockpile caps all decorative,
- * because a player can queue thirteen habitats on turn 1 and win.
+ * ★AC-B4 is the other one that matters, and it was rewritten once. I first framed it as
+ * "building must COST something", having assumed every structure carries a bill of
+ * materials. It does not, and the domain is right where my assumption was wrong: the
+ * Regolith Hopper and Sinter Press are FREE and must be, because the Hopper is what
+ * PRODUCES regolith — charging regolith to build one means the chain can never bootstrap.
+ * Only the Shield Berm carries a bill (450,000,000 g regolith plus 11,000,000 g sintered
+ * plate). Free extractors and expensive products is exactly the shape a bootstrapping
+ * economy should have.
+ *
+ * So ★AC-B4 now asserts the ECONOMY IS LIVE: queue an extractor, run turns, and the
+ * stockpile the expensive structure is priced in must actually fill. That was completely
+ * inert before this bead.
+ *
+ * Cost enforcement is still tested, by AC-B3.2: the Berm has a bill and an empty opening
+ * stockpile, so it must be visibly unbuildable on turn 1. `buildCost` was debited NOWHERE
+ * in production before this work — `turn.ts` scoped it out and named `applyOrders` as the
+ * caller that should charge it, and `applyOrders` did not.
  *
  * UI CONTRACT: the `data-testid` values below are the contract. Implementers add them; do
  * not rename them to suit a component. Where an assertion pins EXACT text it is because a
@@ -170,20 +182,42 @@ test.describe('US-B2 — a queued build becomes a project', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('US-B3 — a build has a price', () => {
-  test('★ AC-B4 committing a build DEBITS its bill of materials', async ({ page }) => {
-    // THE LOAD-BEARING COST TEST. `buildCost` is debited nowhere today: `turn.ts` scopes it
-    // out explicitly and names `applyOrders` as the caller that should charge it, and
-    // `applyOrders` does not. A build tray on top of that lets a player queue thirteen
-    // habitats on turn 1 for nothing and win — which makes the silica chain, the regolith
-    // chain, the 450 t berms and every stockpile cap decorative.
+  test('★ AC-B4 the economy is live — production accumulates and pays for the next thing', async ({
+    page,
+  }) => {
+    // CORRECTED. I first wrote this as "committing a build debits a stockpile", assuming
+    // every structure has a bill of materials. It does not, and the domain is right where
+    // my test was wrong: the Regolith Hopper and Sinter Press are FREE, and they must be.
+    // The Hopper is what PRODUCES regolith, so charging regolith to build one means the
+    // chain can never bootstrap — you would need the output to build the thing that makes
+    // the output. Only the Shield Berm carries a bill (450,000,000 g regolith plus
+    // 11,000,000 g sintered plate), which is exactly the shape a bootstrapping economy
+    // should have: free extractors, expensive products.
     //
-    // A free build would satisfy every other assertion in this file.
+    // So the real assertion is not "a build costs something" — it is that the ECONOMY IS
+    // LIVE: a queued extractor completes, produces, and the stockpile it fills is the one
+    // the expensive structure is priced in. That is the loop the whole resource design
+    // rests on, and it was completely inert before this bead.
     await landAndBegin(page)
-    const stock = page.locator(`[data-testid^="${ID.stockpile}"]`).first()
-    const before = await stock.innerText()
+    const regolith = page.locator(`[data-testid^="${ID.stockpile}"]`).first()
+    const opening = await regolith.innerText()
+
     await queueFirstBuild(page)
-    const after = await stock.innerText()
-    expect(after, 'a committed build did not change any stockpile').not.toBe(before)
+
+    // Long enough to finish a 2-turn Hopper and then produce for several cycles.
+    for (let i = 0; i < 10; i += 1) {
+      const end = page.locator(at(ID.endCycle))
+      if (!(await end.isEnabled())) break
+      const turn = await page.locator(at(ID.turnReadout)).innerText()
+      await end.click()
+      await expect(page.locator(at(ID.turnReadout))).not.toHaveText(turn)
+    }
+
+    const closing = await regolith.innerText()
+    expect(
+      closing,
+      'ten turns after queueing an extractor, no stockpile moved — nothing is producing',
+    ).not.toBe(opening)
   })
 
   test('AC-B3.2 an unaffordable structure cannot be committed', async ({ page }) => {

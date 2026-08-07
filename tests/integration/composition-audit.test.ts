@@ -105,6 +105,24 @@ const ACCEPTED_ORPHANS: readonly string[] = [
   // aic-5lq removed the hardcoded reactor constant in favour of a registry. The
   // registry's writer is authored catalog data, so nothing calls it yet.
   'generation.registerOutputModel',
+
+  // --- The affordability predicates, awaiting the build tray (aic-8tl.10) ---
+  // "Public API awaiting its caller", the same category as `catalog-data.chainOneStructureSpecs`
+  // above — not a helper nobody wired. `applyOrders` ALREADY enforces affordability in
+  // production (it debits `buildCost` and refuses what the colony cannot pay for, which is
+  // the half of aic-8tl.10 that closes the free-building defect); `checkAffordability` is
+  // the same rule exported so the build tray can DISABLE an unaffordable option instead of
+  // letting a player click it and be refused. The tray is being built in parallel and does
+  // not exist yet, so the predicate has no cross-file caller today.
+  //
+  // `canAfford` is the boolean projection of `checkAffordability`, deliberately defined in
+  // terms of it so a greyed-out button and the sim's refusal can never drift apart.
+  //
+  // BOTH entries must be DELETED when the tray lands. If either is still here at that
+  // point, the tray hand-rolled its own affordability check — which is exactly the
+  // duplicate-rule defect this pair exists to prevent.
+  'orders.canAfford',
+  'orders.checkAffordability',
 ]
 
 interface Audit {
