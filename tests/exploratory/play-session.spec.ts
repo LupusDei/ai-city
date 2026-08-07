@@ -93,12 +93,17 @@ test('the re-plot flow returns to a usable survey', async ({ page }) => {
   await candidates.nth(1).click()
   const first = await page.locator(at('site-score')).innerText()
 
-  const replot = page.getByText(/re-plot/i)
+  // NOTE: use the testid, not `getByText(/re-plot/i)`. My first version of this probe
+  // matched the explanatory prose ("Candidate sites are locked — re-plot to choose again")
+  // instead of the button, clicked a paragraph, and reported that re-plot was broken. It
+  // is not: it works correctly. A text selector that also matches the sentence describing
+  // the control is a false-failure generator.
+  const replot = page.locator(at('clear-selection'))
   const hasReplot = (await replot.count()) > 0
   console.log(`\n=== RE-PLOT ===\n  control present: ${String(hasReplot)}`)
   if (!hasReplot) return
 
-  await replot.first().click()
+  await replot.click()
   const after = page.locator('[data-testid^="candidate-site"]:not([disabled])')
   const usable = await after.count()
   console.log(`  candidates enabled after re-plot: ${String(usable)}`)
