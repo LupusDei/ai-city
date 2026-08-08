@@ -39,10 +39,12 @@
  */
 
 import type { ConstructionQueue } from '../../../sim/construction'
-import type { Vented } from '../../../sim/ledger'
+import type { Grid } from '../../../sim/grid'
+import type { Stockpile, Vented } from '../../../sim/ledger'
 import type { MissionOutcome } from '../../../sim/mission'
 import { ELECTRICITY } from '../../../sim/power'
 import { totalTurns } from '../../../sim/time'
+import type { TurnCycleConfig } from '../../../sim/time'
 import type { CycleReport } from '../../../sim/turn'
 import type { World } from '../../../sim/world'
 import type { RunningState } from '../../state/game-state'
@@ -188,6 +190,33 @@ export interface OpsView {
    * a structure the player can count on and one they cannot.
    */
   readonly offlineStructureIds: readonly string[]
+  /**
+   * The COLONY's grid — occupancy included — by reference from `ColonyState.grid`.
+   *
+   * Deliberately the colony's and not `world.grid`, for the reason `OpsScreen` already gives
+   * where it renders the grid dimensions: `buildColony` starts from the surveyed grid and
+   * writes hull occupancy into it, so the colony's grid is DERIVED from the survey's rather
+   * than identical to it. The build tray asks the sim whether a structure may stand on a
+   * tile, and that question can only be answered against the grid that knows what is already
+   * standing there.
+   */
+  readonly colonyGrid: Grid
+  /**
+   * What the colony owns, in integer base units — `ColonyState.stockpiles`, by reference.
+   *
+   * The balance a `buildCost` is debited from, and therefore the input `orders.canAfford`
+   * needs to decide which tray options are offered and which are inert.
+   */
+  readonly stockpiles: Stockpile
+  /**
+   * The mission's turn cycle — configuration, carried through unchanged.
+   *
+   * Needed because a structure's PHYSICAL fact is its draw in WATTS while `consumes.electricity`
+   * is watt-hours PER TURN, so every figure in the build menu is a function of how long a turn
+   * is. `catalog-data.ts` takes this config for exactly that reason rather than reading a
+   * default, and the tray must thread the colony's own cycle rather than assume the default.
+   */
+  readonly turnCycle: TurnCycleConfig
   /** The turn now in progress (1, then 2, ...), or the final turn once the mission is over. */
   readonly turn: number
   /** The mission length: `totalTurns(turnCycle)`, i.e. 278. A pure sim read. */
@@ -262,6 +291,9 @@ export function opsView(state: RunningState): OpsView | null {
     world: state.world,
     queue: state.colony.queue,
     offlineStructureIds: state.colony.offlineStructureIds,
+    colonyGrid: state.colony.grid,
+    stockpiles: state.colony.stockpiles,
+    turnCycle: state.colony.mission.turnCycle,
     turn: report.turn,
     totalTurns: totalTurns(state.colony.mission.turnCycle),
     turnsRemaining: report.mission.turnsRemaining,

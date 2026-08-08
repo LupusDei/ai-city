@@ -96,16 +96,30 @@
  * each other, never the interfaces between them.
  */
 
-import { useState, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
+import { useMemo, useState, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
 
+import type { Coord } from '../../../sim/grid'
+import type { QueueBuildOrder } from '../../../sim/orders'
 import { formatDepositCount, formatGridDimensions } from '../../world-readouts'
 import type { RunningState } from '../../state/game-state'
+import {
+  buildCatalog,
+  buildOptions,
+  placementTargets,
+  queueBuildOrder,
+  rejectionText,
+  selectedOption,
+  stockpileReadouts,
+  underConstructionCount,
+} from './build-tray'
+import type { BuildOption } from './build-tray'
 import { ColonyCanvas } from './ColonyCanvas'
 import { acceptsEndCycle, isEndCycleEnabled } from './end-cycle-guard'
 import type { EndCyclePress } from './end-cycle-guard'
 import { constraintBanner, standingStructures, ventedTone } from './ops-panels'
 import type { ConstraintTone } from './ops-panels'
 import { OPS_STYLES } from './ops-styles'
+import { OPS_TILE_SIZE } from './render-colony'
 import {
   formatLandingScore,
   formatWattHours,
@@ -145,6 +159,27 @@ export interface OpsScreenProps {
    * to drive a sim state transition (FR-004).
    */
   readonly onEndCycle: (afterTurnsTaken: number) => void
+  /**
+   * The player armed a structure in the tray and then clicked a tile on the map.
+   *
+   * Carries the sim's own `QueueBuildOrder` — typed DATA, not a state transition — which the
+   * composition root turns into the one intent the adapter accepts:
+   *
+   * ```tsx
+   * <OpsScreen
+   *   state={game}
+   *   onQueueBuild={(order) => {
+   *     setGame((current) => dispatch(current, { kind: 'issue-orders', orders: [order] }))
+   *   }}
+   * />
+   * ```
+   *
+   * The order is BUILT here (by `build-tray.ts`'s `queueBuildOrder`, which mints the
+   * deterministic instance id) and APPLIED there, for the same reason `onEndCycle` passes
+   * the turn it rendered: the screen knows what the player asked for, and only
+   * `src/app/state/` may drive `applyOrders`.
+   */
+  readonly onQueueBuild: (order: QueueBuildOrder) => void
 }
 
 /**
@@ -230,6 +265,138 @@ function Gauge({
 }
 
 /**
+ * One structure the colony can build: what it is, what it costs, and — when it cannot be
+ * paid for — exactly what is missing.
+ *
+ * THE BUTTON IS DISABLED FROM `orders.canAfford` AND NOTHING ELSE. That predicate is defined
+ * in `orders.ts` AS `checkAffordability(...).ok`, which is the same call `applyOrders` makes
+ * before refusing a build — so a greyed option and the sim's refusal are not merely
+ * consistent, they are the same computation. A hand-rolled comparison against `buildCost`
+ * here would be the duplicate rule that pair exists to prevent.
+ *
+ * AN INERT CONTROL THAT EXPLAINS ITSELF. The shortfall is rendered on the disabled option,
+ * not hidden behind a tooltip or a toast fired after a refused click: "needs 450,000,000 g
+ * regolith, holds 0" is actionable, and "cannot afford" is not. `orders.ts` carries all four
+ * figures on `ResourceShortfall` for precisely this readout.
+ */
+function BuildOptionRow({
+  option,
+  selected,
+  onSelect,
+}: {
+  readonly option: BuildOption
+  readonly selected: boolean
+  readonly onSelect: (id: string) => void
+}): JSX.Element {
+  return (
+    <li className="build-option__item">
+      <button
+        type="button"
+        className="build-option"
+        data-testid={option.testId}
+        data-selected={selected ? 'true' : 'false'}
+        // The sim's predicate, verbatim. See this component's docblock.
+        disabled={!option.affordable}
+        aria-pressed={selected}
+        onClick={() => {
+          onSelect(option.id)
+        }}
+      >
+        <span className="build-option__head">
+          <span className="build-option__name">{option.name}</span>
+          <span className="build-option__cost">{option.costLabel}</span>
+        </span>
+        <span className="build-option__spec">
+          {option.labourLabel} · {option.drawLabel}
+        </span>
+        {option.shortfall.map((line) => (
+          <span className="build-option__short" key={line.resource}>
+            {line.text}
+          </span>
+        ))}
+      </button>
+    </li>
+  )
+}
+
+/**
+ * The placement layer: every tile of the colony grid, offered as a target for the armed
+ * structure.
+ *
+ * IT LIVES ON THE MAP, and that is the whole design. The player has spent the survey screen
+ * reasoning about terrain and the operations screen looking at the plate; asking them to
+ * pick coordinates from a list beside it would discard the one view that makes the decision
+ * make sense. Select a structure, then click the ground.
+ *
+ * ONLY MOUNTED WHILE A STRUCTURE IS ARMED. That is what makes a build a two-step commit
+ * rather than an ordinary ambiguous click: with nothing selected there is no target layer at
+ * all, so a click on the map cannot commit anything, and `build-cancel` takes the layer away
+ * again. It also means the 4,096 target buttons exist only during the gesture that needs
+ * them.
+ *
+ * EVERY VERDICT IS `placement.validatePlacement`'S, resolved in `build-tray.ts`. An illegal
+ * tile is rendered DISABLED rather than omitted — the inert-control rule again — so the
+ * player can see the shape of what is blocked instead of wondering whether the tray simply
+ * forgot a tile.
+ *
+ * NO GAME LOGIC HERE: this multiplies a tile count by a tile size to lay out a grid, which
+ * is the same projection `render-colony.ts` performs, and that is the whole of its
+ * arithmetic.
+ */
+function PlacementOverlay({
+  option,
+  grid,
+  tileSize,
+  onPlace,
+}: {
+  readonly option: BuildOption
+  readonly grid: import('../../../sim/grid').Grid
+  readonly tileSize: number
+  readonly onPlace: (anchor: Coord) => void
+}): JSX.Element {
+  // Recomputed only when the armed structure or the grid changes — not on every unrelated
+  // re-render (a resolved turn, a hovered readout). `validatePlacement` is pure, so this is
+  // a performance memo and never a correctness one: dropping it would change nothing but
+  // speed.
+  const targets = useMemo(
+    () => placementTargets(grid, option.structureType),
+    [grid, option.structureType],
+  )
+
+  return (
+    <div
+      className="place-layer"
+      style={{
+        gridTemplateColumns: `repeat(${String(grid.width)}, ${String(tileSize)}px)`,
+        gridAutoRows: `${String(tileSize)}px`,
+      }}
+      role="group"
+      aria-label={`Choose a site for the ${option.name}`}
+    >
+      {targets.map((target) => (
+        <button
+          type="button"
+          key={target.testId}
+          className="place-target"
+          data-testid={target.testId}
+          data-legal={target.legal ? 'true' : 'false'}
+          disabled={!target.legal}
+          // The sim's own discriminant, surfaced on the tile rather than re-worded.
+          title={
+            target.legal
+              ? `Place the ${option.name} at ${String(target.x)}, ${String(target.y)}`
+              : `${target.reason ?? 'refused'} at ${String(target.x)}, ${String(target.y)}`
+          }
+          onClick={() => {
+            onPlace({ x: target.x, y: target.y })
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
  * The Colony Operations screen.
  *
  * Holds exactly one piece of state, and it is not game state: which turn the last accepted
@@ -237,8 +404,31 @@ function Gauge({
  * category as `placedHulls` in the adapter — and it is what lets the control disable itself
  * while a resolution is in flight without anything here learning what a turn is.
  */
-export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
+export function OpsScreen({ state, onEndCycle, onQueueBuild }: OpsScreenProps): JSX.Element {
   const [acceptedForTurnsTaken, setAcceptedForTurnsTaken] = useState<number | null>(null)
+  /**
+   * The catalog id the player has armed, or `null`.
+   *
+   * The screen's SECOND piece of state, and like the first it is not game state: it is
+   * bookkeeping about the player's own gesture — the same category as `placedHulls` in the
+   * adapter. Nothing in the simulation knows or cares that a tray option is highlighted, and
+   * arming one changes nothing until a tile is clicked.
+   *
+   * Stored as an ID rather than as a `StructureType` so it cannot go stale: the catalog is
+   * rebuilt from the mission's turn cycle, and holding a structure object across a rebuild
+   * would pin a value from an older one.
+   */
+  const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null)
+
+  // Built from the mission's own turn cycle, and memoised on it — ABOVE the narrowing return
+  // below, because a hook may not sit behind a conditional. `buildCatalog` runs the authored
+  // specs through `createCatalog`, the project's one validation boundary, so this is also
+  // where malformed catalog data would fail loudly rather than render a menu quietly missing
+  // a structure.
+  const catalog = useMemo(
+    () => buildCatalog(state.colony.mission.turnCycle),
+    [state.colony.mission.turnCycle],
+  )
 
   const view = opsView(state)
   const lastCycle = lastCycleSummary(state)
@@ -276,6 +466,33 @@ export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
 
     setAcceptedForTurnsTaken(view.turnsTaken)
     onEndCycle(view.turnsTaken)
+  }
+
+  // ---- the build tray -----------------------------------------------------
+  // Every one of these is a pure selection over the sim's own values; see `build-tray.ts`.
+  const options = buildOptions(catalog, view.stockpiles)
+  const armed = selectedOption(options, selectedTypeId)
+  const stockpiles = stockpileReadouts(catalog, view.stockpiles)
+  const underConstruction = underConstructionCount(view.turnCycle, view.queue)
+  const rejection = rejectionText(state.orderOutcomes)
+
+  /**
+   * Commit the armed structure at `anchor`, then disarm.
+   *
+   * DISARMS UNCONDITIONALLY, including when the sim refuses the order. The refusal is
+   * reported (see the `order-rejection` line below) and the player is returned to a neutral
+   * state rather than left holding a loaded cursor over a map they have just been told they
+   * cannot build on — which is how a second, equally-refused click happens.
+   */
+  const handlePlace = (anchor: Coord): void => {
+    if (armed === null) return
+    onQueueBuild(queueBuildOrder(armed.structureType, anchor))
+    setSelectedTypeId(null)
+  }
+
+  /** Arm a structure, or disarm it if it was already the armed one. */
+  const handleSelect = (id: string): void => {
+    setSelectedTypeId((current) => (current === id ? null : id))
   }
 
   return (
@@ -403,8 +620,20 @@ export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
                 </span>
               </span>
             </div>
+            {/* The frame is the positioning context for the placement layer, which sits
+                exactly over the canvas. The canvas itself is untouched by the tray: it is
+                sized from the world and the tile size and never measured, which is the rule
+                `render-colony.ts` depends on. */}
             <div className="ops-plate__frame">
               <ColonyCanvas world={view.world} queue={view.queue} />
+              {armed === null ? null : (
+                <PlacementOverlay
+                  option={armed}
+                  grid={view.colonyGrid}
+                  tileSize={OPS_TILE_SIZE}
+                  onPlace={handlePlace}
+                />
+              )}
             </div>
             {/* The same five marks the survey screen teaches, so one symbol means one thing
                 across the whole game — but captioned tersely, because by the time the player
@@ -487,11 +716,88 @@ export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
                 player asks straight after "what is stopping me", and it had no answer. It
                 also names the two marks on the plate, so the legend's swatches attach to
                 objects rather than to colours. */}
+            {/* WHAT THE COLONY CAN BUILD — the verb this whole screen was missing. Placed
+                between what the colony OWNS and what it is FOR, because that is the order the
+                question arrives in: what is stopping me, what do I have, what can I do about
+                it, what am I aiming at. */}
+            <section className="ops-panel build" aria-label="Build" data-testid="build-tray">
+              <h2 className="ops-panel__heading build__heading">
+                Build
+                <span className="build__queued">
+                  <span className="mono" data-testid="under-construction">
+                    {groupDigits(underConstruction)}
+                  </span>{' '}
+                  under construction
+                </span>
+              </h2>
+
+              <ul className="build-options">
+                {options.map((option) => (
+                  <BuildOptionRow
+                    key={option.id}
+                    option={option}
+                    selected={armed?.id === option.id}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </ul>
+
+              {/* ARMED. Present only while a structure is selected, which is what makes the
+                  commit two-step: this line IS the statement that the next map click will
+                  spend something. `build-cancel` puts the player back to neutral. */}
+              {armed === null ? null : (
+                <div className="build-armed" data-testid="build-selection" role="status">
+                  <span className="build-armed__text">
+                    Placing <strong>{armed.name}</strong> — click a tile on the map
+                  </span>
+                  <button
+                    type="button"
+                    className="build-armed__cancel"
+                    data-testid="build-cancel"
+                    onClick={() => {
+                      setSelectedTypeId(null)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {/* The sim's typed refusal, carried verbatim (FR-006). Absent when the last
+                  batch of orders was accepted — a permanent placeholder would train the
+                  player to ignore the one line that ever explains a failure. */}
+              {rejection === null ? null : (
+                <p className="build-rejection" data-testid="order-rejection" role="alert">
+                  {rejection}
+                </p>
+              )}
+
+              {/* WHAT THE MENU IS PAID IN, beside the menu. The materials come from the
+                  catalog rather than from the stockpile, so a colony that has mined nothing
+                  still learns on turn 1 that regolith is what the Shield Berm costs — see
+                  `stockpileReadouts`. */}
+              <div className="stockpiles">
+                <span className="stockpiles__label">Stockpiles</span>
+                {stockpiles.map((entry) => (
+                  <span className="stockpile" key={entry.resource}>
+                    <span className="stockpile__resource">{entry.resource}</span>
+                    <span className="stockpile__amount mono" data-testid={entry.testId}>
+                      {entry.text}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </section>
+
             <section className="ops-panel" aria-label="Standing structures">
               <h2 className="ops-panel__heading">Standing structures</h2>
               <ul className="structures">
                 {standingStructures(view).map((structure) => (
-                  <li className="structure" key={structure.id}>
+                  <li
+                    className="structure"
+                    key={structure.id}
+                    data-testid={`structure-row-${structure.id}`}
+                  >
                     <span className="structure__name">{structure.name}</span>
                     <span className="structure__tiles">{structure.tileCount} tiles</span>
                     <span
@@ -519,8 +825,15 @@ export function OpsScreen({ state, onEndCycle }: OpsScreenProps): JSX.Element {
                   — resolved
                 </h2>
                 <p className="resolved__line">
-                  <span className="mono">{groupDigits(lastCycle.labourHoursApplied)} h</span> of
-                  labour applied,{' '}
+                  {/* ★AC-B5.1: the figure that says a project actually ABSORBED the colony's
+                      labour. Before any project existed this screen reported 175 h with
+                      nothing to absorb it, every cycle, for 25 turns. The testid carries the
+                      applied figure and nothing else, so "0 h" and "50 h" are
+                      distinguishable without parsing the sentence around them. */}
+                  <span className="mono" data-testid="labour-applied">
+                    {groupDigits(lastCycle.labourHoursApplied)} h
+                  </span>{' '}
+                  of labour applied,{' '}
                   <span className="mono">{groupDigits(lastCycle.labourHoursUnused)} h</span> with no
                   project to absorb it · completed:{' '}
                   {lastCycle.completedThisTurn.length === 0

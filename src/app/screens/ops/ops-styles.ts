@@ -374,6 +374,55 @@ export const OPS_STYLES = `
   border: 1px solid var(--hairline-strong);
   background: var(--void);
   line-height: 0;
+  /* The positioning context for the placement layer. The frame is exactly the canvas's size,
+     so the layer can pin to its edges without anything being measured in JavaScript. */
+  position: relative;
+}
+
+/* ---- placing a structure on the map -------------------------------------- */
+
+/* Mounted ONLY while a structure is armed — see PlacementOverlay. A grid of one cell per
+   tile, laid out from the tile count and the tile size, which is the same projection the
+   renderer uses. "inset: 0" pins it to the canvas rather than to a measurement. */
+.place-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  /* Both track sizes are set INLINE from the sim's grid width and the renderer's tile size.
+     They are the only two numbers on this layer and they belong to the map, not to a
+     stylesheet — hard-coding them here would be a second place the tile size is decided, and
+     the first time OPS_TILE_SIZE changed the targets would slide off the picture. Keeping
+     them inline also keeps this file a plain constant string with no imports. */
+  line-height: 0;
+}
+
+.place-target {
+  padding: 0;
+  border: 0;
+  background: rgba(246, 240, 226, 0.07);
+  /* A hairline lattice so the player can see the tiles they are choosing between, without
+     the layer becoming a wall the map cannot be read through. */
+  box-shadow: inset 0 0 0 1px rgba(246, 240, 226, 0.09);
+  cursor: crosshair;
+}
+
+.place-target:hover:not(:disabled) {
+  background: rgba(120, 214, 160, 0.55);
+  box-shadow: inset 0 0 0 1px var(--summit);
+}
+
+.place-target:focus-visible {
+  outline: 2px solid var(--dust);
+  outline-offset: -2px;
+}
+
+/* Blocked ground: tinted, and NOT clickable. The tile is still offered — an omitted tile is
+   indistinguishable from one the tray forgot — but it cannot be committed, so an illegal
+   placement is refused before the click rather than after it. */
+.place-target:disabled {
+  background: rgba(214, 74, 51, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(214, 74, 51, 0.22);
+  cursor: not-allowed;
 }
 
 .ops-plate__legend {
@@ -502,6 +551,189 @@ export const OPS_STYLES = `
    structure neither generates nor draws, which is a fact the player must not have to hunt
    for in a list where every other row is unremarkable. */
 .structure__status[data-online='false'] { color: var(--amber); }
+
+/* ---- the build tray ------------------------------------------------------ */
+
+.build__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+/* The queue depth reads as a caption on the menu rather than as a fourth gauge: it is the
+   consequence of using the tray, not a constraint competing for attention with the strip. */
+.build__queued {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: none;
+  color: var(--ink-faint);
+}
+
+.build__queued .mono {
+  font-variant-numeric: tabular-nums;
+  color: var(--dust);
+}
+
+.build-options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.build-option__item { display: block; }
+
+.build-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: rgba(58, 26, 18, 0.3);
+  color: var(--ink);
+  cursor: pointer;
+  /* Nowhere near a screenshotted canvas — see this file's header on AC-1.3. */
+  transition: border-color 120ms ease-out, background 120ms ease-out;
+}
+
+.build-option:hover:not(:disabled) {
+  border-color: var(--oxide-lit);
+  background: rgba(122, 52, 32, 0.42);
+}
+
+.build-option:focus-visible { outline: 2px solid var(--dust); outline-offset: 2px; }
+
+/* ARMED. The selected option stays lit while the player is choosing ground, because the map
+   is where their attention has gone and the tray must still say what is loaded. */
+.build-option[data-selected='true'] {
+  border-color: var(--summit);
+  background: rgba(122, 52, 32, 0.55);
+}
+
+/* Unaffordable, and saying so. Not hidden and not merely dimmed: the shortfall line below is
+   the whole point of leaving the option on screen. */
+.build-option:disabled {
+  cursor: not-allowed;
+  border-color: var(--hairline);
+  background: rgba(24, 12, 9, 0.36);
+  color: var(--ink-faint);
+}
+
+.build-option__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.build-option__name { font-size: 13px; color: inherit; }
+
+.build-option__cost {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  text-align: right;
+}
+
+.build-option:disabled .build-option__cost { color: var(--ink-faint); }
+
+.build-option__spec {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+
+/* "needs 450,000,000 g regolith, holds 0" — actionable, where "cannot afford" is not. */
+.build-option__short {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: var(--amber);
+}
+
+/* ---- armed, and the one way back out ------------------------------------- */
+
+.build-armed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--summit);
+  border-radius: var(--radius);
+  background: rgba(122, 52, 32, 0.4);
+}
+
+.build-armed__text { font-size: 12px; line-height: 1.4; color: var(--dust); }
+.build-armed__text strong { color: var(--summit); font-weight: 600; }
+
+.build-armed__cancel {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.build-armed__cancel:hover { color: var(--summit); border-color: var(--dust); }
+.build-armed__cancel:focus-visible { outline: 2px solid var(--dust); outline-offset: 2px; }
+
+/* The sim's typed refusal, verbatim (FR-006). Present only when there IS one. */
+.build-rejection {
+  margin: 9px 0 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(214, 74, 51, 0.45);
+  border-radius: var(--radius);
+  background: rgba(214, 74, 51, 0.14);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #ff9a86;
+}
+
+/* ---- what the menu is paid in -------------------------------------------- */
+
+.stockpiles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.stockpiles__label {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.stockpile { display: inline-flex; align-items: baseline; gap: 6px; }
+
+.stockpile__resource { font-size: 11px; color: var(--ink-faint); }
+
+.stockpile__amount {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dust);
+}
 
 /* ---- the cycle that just ended ------------------------------------------- */
 

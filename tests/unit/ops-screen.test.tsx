@@ -38,6 +38,7 @@ import { OPS_TILE_SIZE } from '../../src/app/screens/ops/render-colony'
 import { dispatch } from '../../src/app/state/game-state'
 import type { RunningState } from '../../src/app/state/game-state'
 import { createGrid } from '../../src/sim/grid'
+import type { QueueBuildOrder } from '../../src/sim/orders'
 import { endCycle, startedColony } from '../support/running-colony'
 
 afterEach(() => {
@@ -49,8 +50,9 @@ afterEach(() => {
 function renderOps(
   state: RunningState,
   onEndCycle: (afterTurnsTaken: number) => void = () => undefined,
+  onQueueBuild: (order: QueueBuildOrder) => void = () => undefined,
 ): void {
-  render(<OpsScreen state={state} onEndCycle={onEndCycle} />)
+  render(<OpsScreen state={state} onEndCycle={onEndCycle} onQueueBuild={onQueueBuild} />)
 }
 
 /**
@@ -66,6 +68,15 @@ function Harness({ initial }: { readonly initial: RunningState }): JSX.Element {
         setState((current) => {
           const next = dispatch(current, { kind: 'end-cycle', afterTurnsTaken })
           if (next.phase !== 'running') throw new Error('end-cycle left the running phase')
+          return next
+        })
+      }}
+      // Wired through the SAME dispatcher as the app's, so a tray test exercises the real
+      // `issue-orders` -> `applyOrders` path rather than a spy that always succeeds.
+      onQueueBuild={(order) => {
+        setState((current) => {
+          const next = dispatch(current, { kind: 'issue-orders', orders: [order] })
+          if (next.phase !== 'running') throw new Error('issue-orders left the running phase')
           return next
         })
       }}
@@ -330,12 +341,20 @@ describe('OpsScreen End Cycle', () => {
   it('should re-enable once the colony has advanced past the accepted turn', () => {
     const onEndCycle = vi.fn()
     const first = startedColony()
-    const { rerender } = render(<OpsScreen state={first} onEndCycle={onEndCycle} />)
+    const { rerender } = render(
+      <OpsScreen state={first} onEndCycle={onEndCycle} onQueueBuild={() => undefined} />,
+    )
 
     fireEvent.click(endCycleButton())
     expect(endCycleButton().disabled).toBe(true)
 
-    rerender(<OpsScreen state={endCycle(first)} onEndCycle={onEndCycle} />)
+    rerender(
+      <OpsScreen
+        state={endCycle(first)}
+        onEndCycle={onEndCycle}
+        onQueueBuild={() => undefined}
+      />,
+    )
 
     expect(endCycleButton().disabled).toBe(false)
     fireEvent.click(endCycleButton())

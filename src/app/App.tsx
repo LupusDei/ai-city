@@ -58,6 +58,7 @@
 import { type JSX, useCallback, useEffect, useState } from 'react'
 
 import type { Coord } from '../sim/grid'
+import type { QueueBuildOrder } from '../sim/orders'
 import { OpsScreen } from './screens/ops/OpsScreen'
 import { SurveyScreen } from './screens/SurveyScreen'
 import { resolveSeed } from './seed'
@@ -114,6 +115,22 @@ export function App({ search, random = Math.random }: AppProps): JSX.Element {
   const startMission = useCallback(() => {
     act({ kind: 'begin-mission' })
   }, [act])
+  /**
+   * The player placed a structure on the map.
+   *
+   * Wrapped in a batch of one because `applyOrders` is batch-shaped and applies orders
+   * SEQUENTIALLY, charging each against the stockpile as it stands after the previous one.
+   * The tray commits one build per click, so the batch is always a single order — but the
+   * intent keeps the array shape rather than flattening it, so a future multi-order gesture
+   * (a queued plan, an AI advisor) needs no new action kind and inherits the sequential
+   * charging rule for free.
+   */
+  const queueBuild = useCallback(
+    (order: QueueBuildOrder) => {
+      act({ kind: 'issue-orders', orders: [order] })
+    },
+    [act],
+  )
   const endCycle = useCallback(
     // Forwarded UNCHANGED — see this file's header. The number is the turn the ops screen
     // rendered, and re-deriving it here would disarm the adapter's stale-token guard.
@@ -146,7 +163,7 @@ export function App({ search, random = Math.random }: AppProps): JSX.Element {
           onBeginMission={startMission}
         />
       ) : (
-        <OpsScreen state={game} onEndCycle={endCycle} />
+        <OpsScreen state={game} onEndCycle={endCycle} onQueueBuild={queueBuild} />
       )}
     </>
   )
